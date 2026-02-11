@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { useRouter } from 'next/navigation';
 
 interface Employee {
   _id: string;
@@ -20,7 +19,6 @@ interface CounterInfo {
 }
 
 export default function AdminPage() {
-  const router = useRouter();
   const [token, setToken] = useState<string | null>(null);
   const [user, setUser] = useState<{ name: string; role: string } | null>(null);
   const [username, setUsername] = useState('');
@@ -81,20 +79,22 @@ export default function AdminPage() {
     } catch (e) { console.error(e); }
   }, []);
 
+  const [authChecked, setAuthChecked] = useState(false);
+
   // Check auth
   useEffect(() => {
     const savedToken = localStorage.getItem('qms-token');
-    if (savedToken) {
-      fetch('/api/auth/me', { headers: { Authorization: `Bearer ${savedToken}` } })
-        .then((r) => r.ok ? r.json() : Promise.reject())
-        .then((data) => {
-          if (data.role !== 'admin') { router.push('/'); return; }
-          setUser(data);
-          setToken(savedToken);
-        })
-        .catch(() => localStorage.removeItem('qms-token'));
-    }
-  }, [router]);
+    if (!savedToken) { setAuthChecked(true); return; }
+    fetch('/api/auth/me', { headers: { Authorization: `Bearer ${savedToken}` } })
+      .then((r) => r.ok ? r.json() : Promise.reject())
+      .then((data) => {
+        if (data.role !== 'admin') { localStorage.removeItem('qms-token'); setAuthChecked(true); return; }
+        setUser(data);
+        setToken(savedToken);
+        setAuthChecked(true);
+      })
+      .catch(() => { localStorage.removeItem('qms-token'); setAuthChecked(true); });
+  }, []);
 
   const login = async () => {
     setLoginLoading(true);
@@ -271,6 +271,15 @@ export default function AdminPage() {
     await fetch('/api/auth/seed', { method: 'POST' });
     alert('Admin account seeded (admin / admin123)');
   };
+
+  // Loading while checking auth
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-gray-500">Loading...</div>
+      </div>
+    );
+  }
 
   // Login screen
   if (!user) {
