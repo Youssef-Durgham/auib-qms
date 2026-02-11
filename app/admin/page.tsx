@@ -31,7 +31,7 @@ export default function AdminPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [counters, setCounters] = useState<CounterInfo[]>([]);
   const [ticketStats, setTicketStats] = useState({ waiting: 0, serving: 0, served: 0, total: 0 });
-  const [tab, setTab] = useState<'dashboard' | 'employees' | 'voice'>('dashboard');
+  const [tab, setTab] = useState<'dashboard' | 'employees' | 'voice' | 'videos'>('dashboard');
 
   // Employee form
   const [showForm, setShowForm] = useState(false);
@@ -49,6 +49,13 @@ export default function AdminPage() {
   const [voiceSaving, setVoiceSaving] = useState(false);
   const [voiceSaved, setVoiceSaved] = useState(false);
 
+  // Video management
+  const [videoList, setVideoList] = useState<{ url: string; name: string }[]>([]);
+  const [newVideoUrl, setNewVideoUrl] = useState('');
+  const [newVideoName, setNewVideoName] = useState('');
+  const [videoSaving, setVideoSaving] = useState(false);
+  const [videoSaved, setVideoSaved] = useState(false);
+
   // Load voices
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
@@ -60,7 +67,7 @@ export default function AdminPage() {
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  // Load saved voice settings
+  // Load saved settings (voice + videos)
   const fetchVoiceSettings = useCallback(async () => {
     try {
       const res = await fetch('/api/settings');
@@ -68,6 +75,9 @@ export default function AdminPage() {
       if (data.voiceName) { setSelectedVoice(data.voiceName); setSavedVoice(data.voiceName); }
       if (data.voiceRate) setVoiceRate(parseFloat(data.voiceRate));
       if (data.voicePitch) setVoicePitch(parseFloat(data.voicePitch));
+      if (data.videos) {
+        try { setVideoList(JSON.parse(data.videos)); } catch { /* ignore */ }
+      }
     } catch (e) { console.error(e); }
   }, []);
 
@@ -224,6 +234,39 @@ export default function AdminPage() {
     setVoiceSaving(false);
   };
 
+  const addVideo = () => {
+    if (!newVideoUrl.trim()) return;
+    setVideoList([...videoList, { url: newVideoUrl.trim(), name: newVideoName.trim() || `Video ${videoList.length + 1}` }]);
+    setNewVideoUrl('');
+    setNewVideoName('');
+  };
+
+  const removeVideo = (index: number) => {
+    setVideoList(videoList.filter((_, i) => i !== index));
+  };
+
+  const moveVideo = (index: number, dir: -1 | 1) => {
+    const newList = [...videoList];
+    const target = index + dir;
+    if (target < 0 || target >= newList.length) return;
+    [newList[index], newList[target]] = [newList[target], newList[index]];
+    setVideoList(newList);
+  };
+
+  const saveVideos = async () => {
+    setVideoSaving(true);
+    try {
+      await fetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ key: 'videos', value: JSON.stringify(videoList) }),
+      });
+      setVideoSaved(true);
+      setTimeout(() => setVideoSaved(false), 3000);
+    } catch (e) { console.error(e); }
+    setVideoSaving(false);
+  };
+
   const seedAdmin = async () => {
     await fetch('/api/auth/seed', { method: 'POST' });
     alert('Admin account seeded (admin / admin123)');
@@ -294,7 +337,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 animate-slide-up" style={{ animationDelay: '0.05s' }}>
-          {(['dashboard', 'employees', 'voice'] as const).map((t) => (
+          {(['dashboard', 'employees', 'voice', 'videos'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -302,7 +345,7 @@ export default function AdminPage() {
                 tab === t ? 'bg-[#9C213F] text-white' : 'btn-glass text-gray-400'
               }`}
             >
-              {t === 'dashboard' ? '📊 Dashboard' : t === 'employees' ? '👥 Employees' : '🔊 Voice Settings'}
+              {t === 'dashboard' ? '📊 Dashboard' : t === 'employees' ? '👥 Employees' : t === 'voice' ? '🔊 Voice' : '🎬 Videos'}
             </button>
           ))}
         </div>
@@ -480,6 +523,81 @@ export default function AdminPage() {
               {employees.length === 0 && (
                 <div className="text-center text-gray-600 py-12">No employees yet. Add one above.</div>
               )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'videos' && (
+          <div className="space-y-6 animate-fade-in">
+            <h3 className="text-lg font-semibold text-[#D4A843]">Display Videos</h3>
+            <p className="text-sm text-gray-500">Add video URLs to play on the display monitor. Videos play in order and loop automatically.</p>
+
+            {/* Add video form */}
+            <div className="glass-card p-6 space-y-4">
+              <h4 className="font-semibold text-white text-sm">Add Video</h4>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Video URL</label>
+                  <input
+                    value={newVideoUrl}
+                    onChange={(e) => setNewVideoUrl(e.target.value)}
+                    className="w-full p-3 rounded-lg input-dark text-sm"
+                    placeholder="https://example.com/video.mp4"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Name</label>
+                  <input
+                    value={newVideoName}
+                    onChange={(e) => setNewVideoName(e.target.value)}
+                    className="w-full p-3 rounded-lg input-dark text-sm"
+                    placeholder="AUIB Promo"
+                  />
+                </div>
+              </div>
+              <button
+                onClick={addVideo}
+                disabled={!newVideoUrl.trim()}
+                className="px-5 py-2.5 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50"
+              >
+                + Add Video
+              </button>
+            </div>
+
+            {/* Video list */}
+            {videoList.length > 0 && (
+              <div className="glass-card p-6 space-y-3">
+                <h4 className="font-semibold text-white text-sm mb-3">Playlist ({videoList.length} video{videoList.length > 1 ? 's' : ''})</h4>
+                {videoList.map((v, i) => (
+                  <div key={i} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                    <span className="text-xs text-gray-600 font-mono w-6">#{i + 1}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-sm font-medium text-white truncate">{v.name}</div>
+                      <div className="text-xs text-gray-500 truncate">{v.url}</div>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => moveVideo(i, -1)} className="text-gray-500 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors text-xs" title="Move up">▲</button>
+                      <button onClick={() => moveVideo(i, 1)} className="text-gray-500 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors text-xs" title="Move down">▼</button>
+                      <button onClick={() => removeVideo(i)} className="text-red-400/60 hover:text-red-400 p-1.5 rounded-lg hover:bg-red-500/10 transition-colors text-xs" title="Remove">✕</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Save */}
+            <button
+              onClick={saveVideos}
+              disabled={videoSaving}
+              className="px-6 py-3 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50"
+            >
+              {videoSaved ? '✓ Saved!' : videoSaving ? 'Saving...' : '💾 Save Video Playlist'}
+            </button>
+
+            {/* Help */}
+            <div className="glass-card-sm p-4 text-xs text-gray-500 space-y-1">
+              <p>💡 <strong className="text-gray-400">Tip:</strong> Use direct video file URLs (.mp4, .webm). Upload videos to a hosting service or your own server.</p>
+              <p>Videos play muted on the display monitor and loop automatically through the playlist.</p>
             </div>
           </div>
         )}

@@ -7,59 +7,77 @@ interface ServingTicket {
   counterNumber: number;
 }
 
+interface VideoItem {
+  url: string;
+  name: string;
+}
+
 export default function DisplayPage() {
   const [serving, setServing] = useState<ServingTicket[]>([]);
   const [waiting, setWaiting] = useState<number[]>([]);
   const [latestCall, setLatestCall] = useState<ServingTicket | null>(null);
   const [animate, setAnimate] = useState(false);
   const [time, setTime] = useState(new Date());
+  const [videos, setVideos] = useState<VideoItem[]>([]);
+  const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const announcementQueue = useRef<ServingTicket[]>([]);
   const speaking = useRef(false);
-  const voicesLoaded = useRef(false);
   const bestVoice = useRef<SpeechSynthesisVoice | null>(null);
-
   const voiceSettings = useRef<{ rate: number; pitch: number }>({ rate: 0.85, pitch: 1.05 });
 
-  // Find best voice — check saved settings first
+  // Load voice settings
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-
     const loadVoices = async () => {
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length === 0) return;
-      voicesLoaded.current = true;
-
-      // Fetch saved voice settings from API
+      const allVoices = window.speechSynthesis.getVoices();
+      if (allVoices.length === 0) return;
       try {
         const res = await fetch('/api/settings');
         const settings = await res.json();
         if (settings.voiceRate) voiceSettings.current.rate = parseFloat(settings.voiceRate);
         if (settings.voicePitch) voiceSettings.current.pitch = parseFloat(settings.voicePitch);
         if (settings.voiceName) {
-          const saved = voices.find((v) => v.name === settings.voiceName);
+          const saved = allVoices.find((v) => v.name === settings.voiceName);
           if (saved) { bestVoice.current = saved; return; }
         }
-      } catch (e) { console.error('Failed to load voice settings', e); }
-
-      // Fallback: auto-detect best voice
-      const preferred = [
-        'Google UK English Female', 'Google UK English Male',
-        'Microsoft Zira', 'Microsoft Susan', 'Samantha', 'Karen',
-        'Daniel', 'Moira', 'Tessa', 'Google US English', 'Microsoft David',
-      ];
+      } catch (e) { console.error(e); }
+      const preferred = ['Google UK English Female','Microsoft Zira','Samantha','Google US English','Microsoft David'];
       for (const name of preferred) {
-        const v = voices.find((voice) => voice.name.includes(name));
+        const v = allVoices.find((voice) => voice.name.includes(name));
         if (v) { bestVoice.current = v; return; }
       }
-      const english = voices.find(
-        (v) => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak')
-      );
-      bestVoice.current = english || voices[0];
+      const eng = allVoices.find((v) => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
+      bestVoice.current = eng || allVoices[0];
     };
-
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
+
+  // Load videos from settings
+  useEffect(() => {
+    fetch('/api/settings').then(r => r.json()).then(data => {
+      if (data.videos) {
+        try { setVideos(JSON.parse(data.videos)); } catch { /* ignore */ }
+      }
+    }).catch(() => {});
+  }, []);
+
+  // Auto-play next video when current ends
+  const handleVideoEnded = () => {
+    if (videos.length > 1) {
+      setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
+    } else if (videoRef.current) {
+      videoRef.current.play();
+    }
+  };
+
+  useEffect(() => {
+    if (videoRef.current && videos.length > 0) {
+      videoRef.current.load();
+      videoRef.current.play().catch(() => {});
+    }
+  }, [currentVideoIndex, videos]);
 
   // Clock
   useEffect(() => {
@@ -87,16 +105,10 @@ export default function DisplayPage() {
     if (speaking.current || announcementQueue.current.length === 0) return;
     speaking.current = true;
     const next = announcementQueue.current.shift()!;
-
-    // Dramatic pause before announcement
     await new Promise((r) => setTimeout(r, 500));
-    // First announcement — polite and professional
     await speakText(`Attention please. Ticket number ${next.ticketNumber}, you are now being served at counter number ${next.counterNumber}. Please proceed to counter ${next.counterNumber}. Thank you.`);
-    // Pause between repeats
     await new Promise((r) => setTimeout(r, 2000));
-    // Second announcement — shorter reminder
     await speakText(`Ticket number ${next.ticketNumber}, counter ${next.counterNumber} please.`);
-
     speaking.current = false;
     processQueue();
   }, [speakText]);
@@ -110,170 +122,219 @@ export default function DisplayPage() {
     try {
       const res = await fetch('/api/tickets');
       const data = await res.json();
-      const servingList = data.serving?.map((t: { number: number; counterNumber: number }) => ({
-        ticketNumber: t.number,
-        counterNumber: t.counterNumber,
-      })) || [];
-      const waitingList = data.waiting?.map((t: { number: number }) => t.number) || [];
-      setServing(servingList);
-      setWaiting(waitingList);
-    } catch (e) {
-      console.error('Failed to fetch tickets', e);
-    }
+      setServing(data.serving?.map((t: { number: number; counterNumber: number }) => ({
+        ticketNumber: t.number, counterNumber: t.counterNumber,
+      })) || []);
+      setWaiting(data.waiting?.map((t: { number: number }) => t.number) || []);
+    } catch (e) { console.error(e); }
   }, []);
 
   useEffect(() => {
     fetchTickets();
     const eventSource = new EventSource('/api/sse');
-
     eventSource.addEventListener('ticket-called', (e) => {
       const data = JSON.parse(e.data);
       const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber };
       setLatestCall(call);
       setAnimate(true);
-      setTimeout(() => setAnimate(false), 4000);
+      setTimeout(() => setAnimate(false), 5000);
       announce(call);
       fetchTickets();
     });
-
     eventSource.addEventListener('ticket-recalled', (e) => {
       const data = JSON.parse(e.data);
       const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber };
       setLatestCall(call);
       setAnimate(true);
-      setTimeout(() => setAnimate(false), 4000);
+      setTimeout(() => setAnimate(false), 5000);
       announce(call);
     });
-
     eventSource.addEventListener('ticket-created', () => fetchTickets());
     eventSource.addEventListener('ticket-completed', () => fetchTickets());
-    eventSource.addEventListener('queue-reset', () => {
-      setServing([]);
-      setWaiting([]);
-      setLatestCall(null);
-    });
-
+    eventSource.addEventListener('queue-reset', () => { setServing([]); setWaiting([]); setLatestCall(null); });
     return () => eventSource.close();
   }, [fetchTickets, announce]);
 
+  // Build ticker text
+  const tickerItems = serving.map(s => `🔴 Ticket ${s.ticketNumber} → Counter ${s.counterNumber}`);
+  if (waiting.length > 0) tickerItems.push(`⏳ ${waiting.length} ticket${waiting.length > 1 ? 's' : ''} waiting`);
+  const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to AUIB — Queue Management System';
+
   return (
-    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'linear-gradient(160deg, #111a1f 0%, #273237 40%, #1a2328 100%)' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-10 py-5 border-b border-white/5">
-        <div className="flex items-center gap-5">
-          <div className="text-5xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-          <div className="h-8 w-px bg-white/10" />
-          <div className="text-xl text-gray-400 font-light tracking-wide">Queue Management System</div>
+    <div className="h-screen flex flex-col overflow-hidden bg-black">
+      {/* ===== TOP BAR — AUIB Branding ===== */}
+      <div className="flex items-center justify-between px-8 py-3 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
+        <div className="flex items-center gap-4">
+          <div className="text-3xl font-black text-white tracking-tight">AUIB</div>
+          <div className="h-6 w-px bg-white/30" />
+          <div className="text-sm text-white/80 font-medium tracking-wide">American University in Iraq, Baghdad</div>
         </div>
-        <div className="text-right">
-          <div className="text-2xl font-semibold text-white tabular-nums">
-            {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
-          </div>
-          <div className="text-sm text-gray-500">
+        <div className="flex items-center gap-4">
+          <div className="text-white/90 text-sm font-medium">
             {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </div>
+          <div className="h-6 w-px bg-white/30" />
+          <div className="text-white text-lg font-bold tabular-nums">
+            {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </div>
         </div>
       </div>
 
-      <div className="flex flex-1 gap-6 p-6 min-h-0">
-        {/* Left side - Now Serving */}
-        <div className="flex-1 flex flex-col gap-5 min-w-0">
-          {/* Main announcement card */}
-          <div
-            className={`flex-1 glass-card flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 ${
-              animate ? 'animate-glow-pulse border-[#9C213F]/40' : ''
-            }`}
-          >
-            {/* Decorative gradient */}
-            <div className="absolute inset-0 bg-gradient-to-br from-[#9C213F]/8 via-transparent to-[#D4A843]/5 pointer-events-none" />
-
-            {latestCall ? (
-              <div className={`relative z-10 text-center ${animate ? 'animate-slide-up' : ''}`}>
-                <div className="text-2xl font-medium tracking-[0.3em] uppercase text-[#D4A843] mb-4 animate-breathe">
-                  Now Serving
-                </div>
-                <div
-                  className={`text-[12rem] font-black leading-none text-white ${animate ? 'animate-number-glow' : ''}`}
-                  style={{ textShadow: '0 0 40px rgba(156,33,63,0.5), 0 4px 20px rgba(0,0,0,0.5)' }}
-                >
-                  {latestCall.ticketNumber}
-                </div>
-                <div className="mt-6 inline-flex items-center gap-3 px-8 py-3 rounded-full bg-[#9C213F]/20 border border-[#9C213F]/30">
-                  <div className="w-2.5 h-2.5 rounded-full bg-[#9C213F] animate-breathe" />
-                  <span className="text-2xl font-semibold text-[#9C213F]">Counter {latestCall.counterNumber}</span>
-                </div>
+      {/* ===== MAIN CONTENT — Video + Counters ===== */}
+      <div className="flex-1 flex min-h-0">
+        
+        {/* LEFT: Video Area (70%) */}
+        <div className="flex-1 relative bg-[#0a0f12]">
+          {videos.length > 0 ? (
+            <video
+              ref={videoRef}
+              className="absolute inset-0 w-full h-full object-cover"
+              muted
+              autoPlay
+              onEnded={handleVideoEnded}
+            >
+              <source src={videos[currentVideoIndex]?.url} />
+            </video>
+          ) : (
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1a2328] to-[#0a0f12]">
+              <div className="text-center">
+                <div className="text-8xl font-black text-[#9C213F]/20 tracking-tight">AUIB</div>
+                <div className="text-gray-600 mt-2">Video will appear here</div>
               </div>
-            ) : (
-              <div className="relative z-10 text-center">
-                <div className="text-6xl mb-4 opacity-30">🏦</div>
-                <div className="text-3xl text-gray-500 font-light">Waiting for tickets...</div>
-                <div className="text-gray-600 mt-2">The queue is currently empty</div>
-              </div>
-            )}
-          </div>
-
-          {/* Active counters grid */}
-          {serving.length > 0 && (
-            <div className="grid grid-cols-4 gap-3">
-              {serving.map((s, i) => (
-                <div
-                  key={s.counterNumber}
-                  className="glass-card-sm p-5 text-center animate-slide-up"
-                  style={{ animationDelay: `${i * 0.05}s` }}
-                >
-                  <div className="text-xs font-medium tracking-wider uppercase text-gray-500 mb-1">
-                    Counter {s.counterNumber}
-                  </div>
-                  <div className="text-4xl font-bold text-[#9C213F]">{s.ticketNumber}</div>
-                </div>
-              ))}
             </div>
           )}
+          
+          {/* Video overlay — subtle AUIB watermark */}
+          <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm rounded-lg px-3 py-1.5">
+            <span className="text-white/60 text-xs font-bold tracking-wider">AUIB</span>
+          </div>
         </div>
 
-        {/* Right side */}
-        <div className="w-[360px] flex flex-col gap-5 flex-shrink-0">
-          {/* Waiting queue */}
-          <div className="flex-1 glass-card p-6 flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-lg font-semibold text-[#D4A843] tracking-wide uppercase">Upcoming</h2>
-              <span className="text-sm text-gray-500 bg-white/5 px-3 py-1 rounded-full">{waiting.length} waiting</span>
-            </div>
-            <div className="space-y-2 overflow-y-auto flex-1 pr-1">
-              {waiting.length === 0 ? (
-                <div className="text-gray-600 text-center py-12">
-                  <div className="text-4xl mb-2 opacity-40">✨</div>
-                  No tickets waiting
+        {/* RIGHT: Queue Panel (30%) */}
+        <div className="w-[380px] flex flex-col bg-[#111a1f] border-l border-[#9C213F]/20">
+          
+          {/* Now Serving — Main Highlight */}
+          <div className={`relative p-6 transition-all duration-700 ${animate ? 'bg-[#9C213F]/10' : ''}`}>
+            <div className="absolute inset-0 bg-gradient-to-b from-[#9C213F]/5 to-transparent pointer-events-none" />
+            <div className="relative z-10">
+              <div className="flex items-center gap-2 mb-3">
+                <div className={`w-3 h-3 rounded-full bg-[#9C213F] ${animate ? 'animate-pulse' : ''}`} />
+                <span className="text-xs font-bold tracking-[0.25em] uppercase text-[#9C213F]">Now Serving</span>
+              </div>
+              {latestCall ? (
+                <div className={`${animate ? 'animate-slideInRight' : ''}`}>
+                  <div className="text-[5rem] font-black text-white leading-none" style={{ textShadow: '0 0 30px rgba(156,33,63,0.4)' }}>
+                    {latestCall.ticketNumber}
+                  </div>
+                  <div className="mt-2 inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#9C213F]/20 border border-[#9C213F]/30">
+                    <span className="text-lg font-semibold text-[#9C213F]">Counter {latestCall.counterNumber}</span>
+                  </div>
                 </div>
               ) : (
-                waiting.slice(0, 20).map((num, i) => (
-                  <div
-                    key={num}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.04] hover:bg-white/[0.06] transition-colors animate-ticket-in"
-                    style={{ animationDelay: `${i * 0.04}s` }}
-                  >
-                    <span className="text-sm text-gray-500 font-mono">#{i + 1}</span>
-                    <span className="text-xl font-bold tabular-nums">{num}</span>
+                <div className="text-2xl text-gray-600 font-light">—</div>
+              )}
+            </div>
+          </div>
+
+          {/* Divider */}
+          <div className="h-px bg-gradient-to-r from-transparent via-[#9C213F]/30 to-transparent" />
+
+          {/* Active Counters */}
+          {serving.length > 0 && (
+            <>
+              <div className="px-6 py-4">
+                <div className="text-xs font-bold tracking-[0.2em] uppercase text-[#D4A843] mb-3">Active Counters</div>
+                <div className="grid grid-cols-2 gap-2">
+                  {serving.map((s) => (
+                    <div key={s.counterNumber} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-center">
+                      <div className="text-[10px] text-gray-500 uppercase tracking-wider">Counter {s.counterNumber}</div>
+                      <div className="text-2xl font-bold text-white mt-0.5">{s.ticketNumber}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className="h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+            </>
+          )}
+
+          {/* Waiting Queue */}
+          <div className="flex-1 px-6 py-4 flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold tracking-[0.2em] uppercase text-gray-500">Waiting</span>
+              <span className="text-xs text-gray-600 bg-white/5 px-2.5 py-1 rounded-full">{waiting.length}</span>
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+              {waiting.length === 0 ? (
+                <div className="text-gray-700 text-center py-8 text-sm">Queue is empty</div>
+              ) : (
+                waiting.slice(0, 25).map((num, i) => (
+                  <div key={num} className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
+                    <span className="text-xs text-gray-600 font-mono">#{i + 1}</span>
+                    <span className="text-lg font-bold text-gray-300 tabular-nums">{num}</span>
                   </div>
                 ))
               )}
-              {waiting.length > 20 && (
-                <div className="text-center text-gray-500 text-sm py-2">+{waiting.length - 20} more</div>
+              {waiting.length > 25 && (
+                <div className="text-center text-gray-600 text-xs py-2">+{waiting.length - 25} more</div>
               )}
-            </div>
-          </div>
-
-          {/* Video / promo area */}
-          <div className="h-52 glass-card overflow-hidden flex items-center justify-center relative">
-            <div className="absolute inset-0 bg-gradient-to-br from-[#9C213F]/5 to-[#D4A843]/5" />
-            <div className="text-center relative z-10">
-              <div className="text-5xl mb-3">🎓</div>
-              <div className="text-sm text-gray-400 font-medium">AUIB Promotional</div>
-              <div className="text-xs text-gray-600 mt-1">Video area</div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* ===== BOTTOM TICKER — News-style ===== */}
+      <div className="relative z-20">
+        {/* Announcement flash bar — appears when new ticket called */}
+        {animate && latestCall && (
+          <div className="bg-[#D4A843] text-black py-2 px-6 flex items-center gap-4 animate-slideDown">
+            <span className="font-black text-sm tracking-wider uppercase bg-[#9C213F] text-white px-3 py-0.5 rounded">
+              NOW SERVING
+            </span>
+            <span className="font-bold text-lg">
+              Ticket #{latestCall.ticketNumber} → Counter {latestCall.counterNumber}
+            </span>
+          </div>
+        )}
+        
+        {/* Scrolling ticker */}
+        <div className="bg-[#1a0810] border-t-2 border-[#9C213F] flex items-center overflow-hidden h-12">
+          <div className="flex-shrink-0 bg-[#9C213F] h-full flex items-center px-5 z-10">
+            <span className="text-white font-black text-sm tracking-wider">AUIB QUEUE</span>
+          </div>
+          <div className="flex-1 overflow-hidden relative">
+            <div className="animate-ticker whitespace-nowrap flex items-center h-12">
+              <span className="text-gray-200 text-sm font-medium px-8">
+                {tickerText}
+                <span className="mx-12 text-[#9C213F]">●</span>
+                {tickerText}
+                <span className="mx-12 text-[#9C213F]">●</span>
+                {tickerText}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <style jsx>{`
+        @keyframes slideInRight {
+          from { opacity: 0; transform: translateX(30px); }
+          to { opacity: 1; transform: translateX(0); }
+        }
+        @keyframes slideDown {
+          from { opacity: 0; transform: translateY(-100%); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes ticker {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-33.33%); }
+        }
+        .animate-slideInRight { animation: slideInRight 0.6s ease-out; }
+        .animate-slideDown { animation: slideDown 0.3s ease-out; }
+        .animate-ticker { animation: ticker 30s linear infinite; }
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156,33,63,0.3); border-radius: 2px; }
+      `}</style>
     </div>
   );
 }
