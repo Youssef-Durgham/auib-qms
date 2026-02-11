@@ -84,14 +84,14 @@ export default function DisplayPage() {
     speaking.current = true;
     const next = announcementQueue.current.shift()!;
 
-    // Small dramatic pause
-    await new Promise((r) => setTimeout(r, 300));
-    // First announcement
-    await speakText(`Ticket ${next.ticketNumber}... Counter ${next.counterNumber}`);
+    // Dramatic pause before announcement
+    await new Promise((r) => setTimeout(r, 500));
+    // First announcement — polite and professional
+    await speakText(`Attention please. Ticket number ${next.ticketNumber}, you are now being served at counter number ${next.counterNumber}. Please proceed to counter ${next.counterNumber}. Thank you.`);
     // Pause between repeats
-    await new Promise((r) => setTimeout(r, 1500));
-    // Second announcement
-    await speakText(`Ticket ${next.ticketNumber}... Counter ${next.counterNumber}`);
+    await new Promise((r) => setTimeout(r, 2000));
+    // Second announcement — shorter reminder
+    await speakText(`Ticket number ${next.ticketNumber}, counter ${next.counterNumber} please.`);
 
     speaking.current = false;
     processQueue();
