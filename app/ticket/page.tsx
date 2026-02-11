@@ -3,22 +3,28 @@
 import { useState, useEffect, useCallback } from 'react';
 
 interface TicketData {
-  ticket: { number: number; createdAt: string };
+  ticket: { number: number; createdAt: string; category: string };
   position: number;
   estimatedWait: number;
 }
+
+const DEFAULT_CATEGORIES = ['Registration', 'Finance', 'IT Support', 'General Inquiry'];
 
 export default function TicketPage() {
   const [ticketData, setTicketData] = useState<TicketData | null>(null);
   const [loading, setLoading] = useState(false);
   const [waitingCount, setWaitingCount] = useState(0);
+  const [avgServeTime, setAvgServeTime] = useState(5);
   const [showTicket, setShowTicket] = useState(false);
+  const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
 
   const fetchQueue = useCallback(async () => {
     try {
       const res = await fetch('/api/tickets');
       const data = await res.json();
       setWaitingCount(data.waiting?.length || 0);
+      if (data.avgServeTime) setAvgServeTime(data.avgServeTime);
     } catch (e) {
       console.error(e);
     }
@@ -26,6 +32,16 @@ export default function TicketPage() {
 
   useEffect(() => {
     fetchQueue();
+    // Load categories from settings
+    fetch('/api/settings').then(r => r.json()).then(data => {
+      if (data.categories) {
+        try {
+          const cats = JSON.parse(data.categories);
+          if (cats.length > 0) setCategories(cats);
+        } catch { /* ignore */ }
+      }
+    }).catch(() => {});
+
     const eventSource = new EventSource('/api/sse');
     eventSource.addEventListener('ticket-called', () => fetchQueue());
     eventSource.addEventListener('ticket-created', () => fetchQueue());
@@ -34,17 +50,19 @@ export default function TicketPage() {
       setWaitingCount(0);
       setTicketData(null);
       setShowTicket(false);
+      setSelectedCategory(null);
     });
     return () => eventSource.close();
   }, [fetchQueue]);
 
   const takeTicket = async () => {
+    if (!selectedCategory) return;
     setLoading(true);
     try {
       const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ category: selectedCategory }),
       });
       const data = await res.json();
       setTicketData(data);
@@ -57,7 +75,9 @@ export default function TicketPage() {
   };
 
   const printTicket = () => window.print();
-  const resetView = () => { setShowTicket(false); setTicketData(null); };
+  const resetView = () => { setShowTicket(false); setTicketData(null); setSelectedCategory(null); };
+
+  const estimatedMin = waitingCount * avgServeTime;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-6 relative overflow-hidden">
@@ -81,19 +101,43 @@ export default function TicketPage() {
 
             <div className="text-gray-400 text-sm uppercase tracking-wider mb-2">People waiting</div>
             <div className="text-6xl font-black text-white mb-1">{waitingCount}</div>
-            <div className="text-sm text-gray-600 mb-8">~{waitingCount * 5} min estimated</div>
+            <div className="text-sm text-gray-600 mb-6">~{estimatedMin} min estimated</div>
 
-            <button
-              onClick={takeTicket}
-              disabled={loading}
-              className="w-full py-7 rounded-2xl btn-crimson text-2xl font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <span className="animate-breathe">Taking ticket...</span>
-              ) : (
-                'Take a Ticket'
-              )}
-            </button>
+            {/* Category selection */}
+            {!selectedCategory ? (
+              <div>
+                <div className="text-sm text-[#D4A843] font-medium mb-3 uppercase tracking-wider">Select Service</div>
+                <div className="grid grid-cols-2 gap-3">
+                  {categories.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setSelectedCategory(cat)}
+                      className="py-4 px-3 rounded-xl btn-glass text-sm font-medium hover:border-[#9C213F]/40 transition-all"
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <div className="mb-4 px-4 py-2 rounded-xl bg-[#D4A843]/10 border border-[#D4A843]/20 text-[#D4A843] text-sm font-medium">
+                  {selectedCategory}
+                  <button onClick={() => setSelectedCategory(null)} className="ml-2 text-[#D4A843]/50 hover:text-[#D4A843]">✕</button>
+                </div>
+                <button
+                  onClick={takeTicket}
+                  disabled={loading}
+                  className="w-full py-7 rounded-2xl btn-crimson text-2xl font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loading ? (
+                    <span className="animate-breathe">Taking ticket...</span>
+                  ) : (
+                    'Take a Ticket'
+                  )}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       ) : (
@@ -104,11 +148,17 @@ export default function TicketPage() {
 
             <div className="text-sm font-medium tracking-[0.2em] uppercase text-[#D4A843] mb-3">Your Ticket</div>
             <div
-              className="text-9xl font-black text-white mb-6 animate-number-glow"
+              className="text-9xl font-black text-white mb-4 animate-number-glow"
               style={{ textShadow: '0 0 40px rgba(156,33,63,0.4)' }}
             >
               {ticketData?.ticket.number}
             </div>
+
+            {ticketData?.ticket.category && (
+              <div className="mb-6 inline-block px-4 py-1.5 rounded-full bg-[#D4A843]/10 border border-[#D4A843]/20 text-[#D4A843] text-sm font-medium">
+                {ticketData.ticket.category}
+              </div>
+            )}
 
             <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-6" />
 

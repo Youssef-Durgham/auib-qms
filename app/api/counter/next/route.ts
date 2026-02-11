@@ -18,9 +18,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Get next waiting ticket
+  // Get next waiting ticket (optionally filtered by counter categories)
+  const query: Record<string, unknown> = { status: 'waiting', createdAt: { $gte: start, $lt: end } };
+  if (counter?.categories && counter.categories.length > 0) {
+    query.category = { $in: counter.categories };
+  }
+
   const nextTicket = await Ticket.findOneAndUpdate(
-    { status: 'waiting', createdAt: { $gte: start, $lt: end } },
+    query,
     { status: 'serving', counterNumber, servedAt: new Date() },
     { sort: { number: 1 }, new: true }
   );
