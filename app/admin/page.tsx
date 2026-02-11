@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 
 interface Employee {
   _id: string;
@@ -48,11 +48,12 @@ export default function AdminPage() {
   const [voiceSaved, setVoiceSaved] = useState(false);
 
   // Video management
-  const [videoList, setVideoList] = useState<{ url: string; name: string }[]>([]);
-  const [newVideoUrl, setNewVideoUrl] = useState('');
-  const [newVideoName, setNewVideoName] = useState('');
+  const [videoList, setVideoList] = useState<{ url: string; name: string; filename: string }[]>([]);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState('');
   const [videoSaving, setVideoSaving] = useState(false);
   const [videoSaved, setVideoSaved] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Load voices
   useEffect(() => {
@@ -74,9 +75,12 @@ export default function AdminPage() {
       if (data.voiceName) { setSelectedVoice(data.voiceName); setSavedVoice(data.voiceName); }
       if (data.voiceRate) setVoiceRate(parseFloat(data.voiceRate));
       if (data.voicePitch) setVoicePitch(parseFloat(data.voicePitch));
-      if (data.videos) {
-        try { setVideoList(JSON.parse(data.videos)); } catch { /* ignore */ }
-      }
+      // Load videos from file API
+      try {
+        const vRes = await fetch('/api/videos');
+        const vData = await vRes.json();
+        if (vData.videos) setVideoList(vData.videos);
+      } catch { /* ignore */ }
     } catch (e) { console.error(e); }
   }, []);
 
@@ -235,36 +239,73 @@ export default function AdminPage() {
     setVoiceSaving(false);
   };
 
-  const addVideo = () => {
-    if (!newVideoUrl.trim()) return;
-    setVideoList([...videoList, { url: newVideoUrl.trim(), name: newVideoName.trim() || `Video ${videoList.length + 1}` }]);
-    setNewVideoUrl('');
-    setNewVideoName('');
+  const uploadVideo = async (file: File) => {
+    setVideoUploading(true);
+    setUploadProgress(`Uploading ${file.name}...`);
+    try {
+      const formData = new FormData();
+      formData.append('video', file);
+      const res = await fetch('/api/videos', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+      const data = await res.json();
+      if (!res.ok) { alert(data.error || 'Upload failed'); setVideoUploading(false); setUploadProgress(''); return; }
+      setVideoList([...videoList, data.video]);
+      setUploadProgress('');
+      // Save playlist to settings
+      await saveVideoPlaylist([...videoList, data.video]);
+    } catch (e) { console.error(e); alert('Upload failed'); }
+    setVideoUploading(false);
   };
 
-  const removeVideo = (index: number) => {
-    setVideoList(videoList.filter((_, i) => i !== index));
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    uploadVideo(files[0]);
+    e.target.value = '';
   };
 
-  const moveVideo = (index: number, dir: -1 | 1) => {
+  const removeVideo = async (index: number) => {
+    const video = videoList[index];
+    if (!confirm(`Delete "${video.name}"?`)) return;
+    try {
+      await fetch('/api/videos', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ filename: video.filename }),
+      });
+      const newList = videoList.filter((_, i) => i !== index);
+      setVideoList(newList);
+      await saveVideoPlaylist(newList);
+    } catch (e) { console.error(e); }
+  };
+
+  const moveVideo = async (index: number, dir: -1 | 1) => {
     const newList = [...videoList];
     const target = index + dir;
     if (target < 0 || target >= newList.length) return;
     [newList[index], newList[target]] = [newList[target], newList[index]];
     setVideoList(newList);
+    await saveVideoPlaylist(newList);
   };
 
-  const saveVideos = async () => {
-    setVideoSaving(true);
+  const saveVideoPlaylist = async (list: typeof videoList) => {
     try {
       await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ key: 'videos', value: JSON.stringify(videoList) }),
+        body: JSON.stringify({ key: 'videos', value: JSON.stringify(list) }),
       });
-      setVideoSaved(true);
-      setTimeout(() => setVideoSaved(false), 3000);
     } catch (e) { console.error(e); }
+  };
+
+  const saveVideos = async () => {
+    setVideoSaving(true);
+    await saveVideoPlaylist(videoList);
+    setVideoSaved(true);
+    setTimeout(() => setVideoSaved(false), 3000);
     setVideoSaving(false);
   };
 
@@ -542,36 +583,33 @@ export default function AdminPage() {
             <h3 className="text-lg font-semibold text-[#D4A843]">Display Videos</h3>
             <p className="text-sm text-gray-500">Add video URLs to play on the display monitor. Videos play in order and loop automatically.</p>
 
-            {/* Add video form */}
+            {/* Upload video */}
             <div className="glass-card p-6 space-y-4">
-              <h4 className="font-semibold text-white text-sm">Add Video</h4>
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
-                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Video URL</label>
-                  <input
-                    value={newVideoUrl}
-                    onChange={(e) => setNewVideoUrl(e.target.value)}
-                    className="w-full p-3 rounded-lg input-dark text-sm"
-                    placeholder="https://example.com/video.mp4"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Name</label>
-                  <input
-                    value={newVideoName}
-                    onChange={(e) => setNewVideoName(e.target.value)}
-                    className="w-full p-3 rounded-lg input-dark text-sm"
-                    placeholder="AUIB Promo"
-                  />
-                </div>
-              </div>
-              <button
-                onClick={addVideo}
-                disabled={!newVideoUrl.trim()}
-                className="px-5 py-2.5 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50"
+              <h4 className="font-semibold text-white text-sm">Upload Video</h4>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <div
+                onClick={() => !videoUploading && fileInputRef.current?.click()}
+                className={`border-2 border-dashed border-white/10 rounded-xl p-8 text-center cursor-pointer hover:border-[#9C213F]/40 hover:bg-white/[0.02] transition-all ${videoUploading ? 'opacity-50 pointer-events-none' : ''}`}
               >
-                + Add Video
-              </button>
+                {videoUploading ? (
+                  <div>
+                    <div className="text-3xl mb-2 animate-pulse">⏳</div>
+                    <div className="text-sm text-gray-400">{uploadProgress}</div>
+                  </div>
+                ) : (
+                  <div>
+                    <div className="text-3xl mb-2">📁</div>
+                    <div className="text-sm text-white font-medium">Click to upload video</div>
+                    <div className="text-xs text-gray-500 mt-1">MP4, WebM, MOV — stored locally for fast playback</div>
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Video list */}
@@ -582,9 +620,11 @@ export default function AdminPage() {
                   <div key={i} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
                     <span className="text-xs text-gray-600 font-mono w-6">#{i + 1}</span>
                     <div className="flex-1 min-w-0">
-                      <div className="text-sm font-medium text-white truncate">{v.name}</div>
+                      <div className="text-sm font-medium text-white truncate">{v.name || v.filename}</div>
                       <div className="text-xs text-gray-500 truncate">{v.url}</div>
                     </div>
+                    {/* Preview thumbnail */}
+                    <video src={v.url} className="w-16 h-10 rounded object-cover bg-black/50" muted preload="metadata" />
                     <div className="flex items-center gap-1">
                       <button onClick={() => moveVideo(i, -1)} className="text-gray-500 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors text-xs" title="Move up">▲</button>
                       <button onClick={() => moveVideo(i, 1)} className="text-gray-500 hover:text-white p-1.5 rounded-lg hover:bg-white/5 transition-colors text-xs" title="Move down">▼</button>
@@ -606,8 +646,9 @@ export default function AdminPage() {
 
             {/* Help */}
             <div className="glass-card-sm p-4 text-xs text-gray-500 space-y-1">
-              <p>💡 <strong className="text-gray-400">Tip:</strong> Use direct video file URLs (.mp4, .webm). Upload videos to a hosting service or your own server.</p>
+              <p>💡 <strong className="text-gray-400">Tip:</strong> Videos are stored locally in the project for fast loading — no external hosting needed.</p>
               <p>Videos play muted on the display monitor and loop automatically through the playlist.</p>
+              <p>Supported formats: MP4, WebM, MOV.</p>
             </div>
           </div>
         )}
