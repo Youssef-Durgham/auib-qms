@@ -58,7 +58,8 @@ export default function AdminPage() {
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
     const loadVoices = () => {
-      const v = window.speechSynthesis.getVoices();
+      const all = window.speechSynthesis.getVoices();
+      const v = all.filter((voice) => voice.lang.startsWith('en') || voice.lang.startsWith('ar'));
       if (v.length > 0) setVoices(v);
     };
     loadVoices();
