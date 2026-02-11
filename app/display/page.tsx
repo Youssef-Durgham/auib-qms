@@ -18,35 +18,39 @@ export default function DisplayPage() {
   const voicesLoaded = useRef(false);
   const bestVoice = useRef<SpeechSynthesisVoice | null>(null);
 
-  // Find best voice
+  const voiceSettings = useRef<{ rate: number; pitch: number }>({ rate: 0.85, pitch: 1.05 });
+
+  // Find best voice — check saved settings first
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
-    const loadVoices = () => {
+    const loadVoices = async () => {
       const voices = window.speechSynthesis.getVoices();
       if (voices.length === 0) return;
       voicesLoaded.current = true;
 
-      const preferred = [
-        'Google UK English Female',
-        'Google UK English Male',
-        'Microsoft Zira',
-        'Microsoft Susan',
-        'Samantha',
-        'Karen',
-        'Daniel',
-        'Moira',
-        'Tessa',
-        'Google US English',
-        'Microsoft David',
-      ];
+      // Fetch saved voice settings from API
+      try {
+        const res = await fetch('/api/settings');
+        const settings = await res.json();
+        if (settings.voiceRate) voiceSettings.current.rate = parseFloat(settings.voiceRate);
+        if (settings.voicePitch) voiceSettings.current.pitch = parseFloat(settings.voicePitch);
+        if (settings.voiceName) {
+          const saved = voices.find((v) => v.name === settings.voiceName);
+          if (saved) { bestVoice.current = saved; return; }
+        }
+      } catch (e) { console.error('Failed to load voice settings', e); }
 
+      // Fallback: auto-detect best voice
+      const preferred = [
+        'Google UK English Female', 'Google UK English Male',
+        'Microsoft Zira', 'Microsoft Susan', 'Samantha', 'Karen',
+        'Daniel', 'Moira', 'Tessa', 'Google US English', 'Microsoft David',
+      ];
       for (const name of preferred) {
         const v = voices.find((voice) => voice.name.includes(name));
         if (v) { bestVoice.current = v; return; }
       }
-
-      // Fallback: pick first English voice that's not espeak
       const english = voices.find(
         (v) => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak')
       );
@@ -69,8 +73,8 @@ export default function DisplayPage() {
       window.speechSynthesis.cancel();
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
-      utterance.rate = 0.85;
-      utterance.pitch = 1.05;
+      utterance.rate = voiceSettings.current.rate;
+      utterance.pitch = voiceSettings.current.pitch;
       utterance.volume = 1;
       if (bestVoice.current) utterance.voice = bestVoice.current;
       utterance.onend = () => resolve();

@@ -31,13 +31,45 @@ export default function AdminPage() {
   const [employees, setEmployees] = useState<Employee[]>([]);
   const [counters, setCounters] = useState<CounterInfo[]>([]);
   const [ticketStats, setTicketStats] = useState({ waiting: 0, serving: 0, served: 0, total: 0 });
-  const [tab, setTab] = useState<'dashboard' | 'employees'>('dashboard');
+  const [tab, setTab] = useState<'dashboard' | 'employees' | 'voice'>('dashboard');
 
   // Employee form
   const [showForm, setShowForm] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [form, setForm] = useState({ username: '', password: '', name: '', counterNumber: '', role: 'employee' });
   const [formError, setFormError] = useState('');
+
+  // Voice settings
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoice, setSelectedVoice] = useState('');
+  const [savedVoice, setSavedVoice] = useState('');
+  const [voiceRate, setVoiceRate] = useState(0.85);
+  const [voicePitch, setVoicePitch] = useState(1.05);
+  const [previewText, setPreviewText] = useState('Attention please. Ticket number 42, you are now being served at counter number 3. Please proceed to counter 3. Thank you.');
+  const [voiceSaving, setVoiceSaving] = useState(false);
+  const [voiceSaved, setVoiceSaved] = useState(false);
+
+  // Load voices
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    const loadVoices = () => {
+      const v = window.speechSynthesis.getVoices();
+      if (v.length > 0) setVoices(v);
+    };
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+  }, []);
+
+  // Load saved voice settings
+  const fetchVoiceSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings');
+      const data = await res.json();
+      if (data.voiceName) { setSelectedVoice(data.voiceName); setSavedVoice(data.voiceName); }
+      if (data.voiceRate) setVoiceRate(parseFloat(data.voiceRate));
+      if (data.voicePitch) setVoicePitch(parseFloat(data.voicePitch));
+    } catch (e) { console.error(e); }
+  }, []);
 
   // Check auth
   useEffect(() => {
@@ -116,9 +148,10 @@ export default function AdminPage() {
     if (!token) return;
     fetchEmployees();
     fetchStats();
+    fetchVoiceSettings();
     const interval = setInterval(fetchStats, 5000);
     return () => clearInterval(interval);
-  }, [token, fetchEmployees, fetchStats]);
+  }, [token, fetchEmployees, fetchStats, fetchVoiceSettings]);
 
   const saveEmployee = async () => {
     setFormError('');
@@ -154,6 +187,41 @@ export default function AdminPage() {
     if (!confirm('Reset the entire queue? This cannot be undone.')) return;
     await fetch('/api/reset', { method: 'POST' });
     fetchStats();
+  };
+
+  const previewVoice = () => {
+    if (!window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(previewText);
+    utterance.rate = voiceRate;
+    utterance.pitch = voicePitch;
+    utterance.volume = 1;
+    utterance.lang = 'en-US';
+    if (selectedVoice) {
+      const v = voices.find((voice) => voice.name === selectedVoice);
+      if (v) utterance.voice = v;
+    }
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const stopPreview = () => {
+    window.speechSynthesis?.cancel();
+  };
+
+  const saveVoiceSettings = async () => {
+    setVoiceSaving(true);
+    try {
+      const headers = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+      await Promise.all([
+        fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify({ key: 'voiceName', value: selectedVoice }) }),
+        fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify({ key: 'voiceRate', value: String(voiceRate) }) }),
+        fetch('/api/settings', { method: 'POST', headers, body: JSON.stringify({ key: 'voicePitch', value: String(voicePitch) }) }),
+      ]);
+      setSavedVoice(selectedVoice);
+      setVoiceSaved(true);
+      setTimeout(() => setVoiceSaved(false), 3000);
+    } catch (e) { console.error(e); }
+    setVoiceSaving(false);
   };
 
   const seedAdmin = async () => {
@@ -226,7 +294,7 @@ export default function AdminPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-6 animate-slide-up" style={{ animationDelay: '0.05s' }}>
-          {(['dashboard', 'employees'] as const).map((t) => (
+          {(['dashboard', 'employees', 'voice'] as const).map((t) => (
             <button
               key={t}
               onClick={() => setTab(t)}
@@ -234,7 +302,7 @@ export default function AdminPage() {
                 tab === t ? 'bg-[#9C213F] text-white' : 'btn-glass text-gray-400'
               }`}
             >
-              {t === 'dashboard' ? '📊 Dashboard' : '👥 Employees'}
+              {t === 'dashboard' ? '📊 Dashboard' : t === 'employees' ? '👥 Employees' : '🔊 Voice Settings'}
             </button>
           ))}
         </div>
@@ -412,6 +480,134 @@ export default function AdminPage() {
               {employees.length === 0 && (
                 <div className="text-center text-gray-600 py-12">No employees yet. Add one above.</div>
               )}
+            </div>
+          </div>
+        )}
+
+        {tab === 'voice' && (
+          <div className="space-y-6 animate-fade-in">
+            <h3 className="text-lg font-semibold text-[#D4A843]">Voice Announcement Settings</h3>
+
+            {/* Current saved voice */}
+            {savedVoice && (
+              <div className="glass-card-sm p-4 flex items-center gap-3">
+                <span className="text-green-400">✓</span>
+                <span className="text-sm text-gray-400">Currently saved:</span>
+                <span className="text-sm text-white font-medium">{savedVoice}</span>
+              </div>
+            )}
+
+            {/* Voice selector */}
+            <div className="glass-card p-6 space-y-5">
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Select Voice</label>
+                <select
+                  value={selectedVoice}
+                  onChange={(e) => setSelectedVoice(e.target.value)}
+                  className="w-full p-4 rounded-xl input-dark text-base"
+                >
+                  <option value="">Auto (best available)</option>
+                  {voices.map((v) => (
+                    <option key={v.name} value={v.name} className="bg-[#1a2328]">
+                      {v.name} ({v.lang}) {v.localService ? '' : '☁️'}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-600 mt-2">☁️ = Cloud voice (may sound better but needs internet)</p>
+              </div>
+
+              {/* Rate & Pitch */}
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-2 block">
+                    Speed: {voiceRate.toFixed(2)}
+                  </label>
+                  <input
+                    type="range" min="0.5" max="1.5" step="0.05"
+                    value={voiceRate}
+                    onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                    className="w-full accent-[#9C213F]"
+                  />
+                  <div className="flex justify-between text-xs text-gray-600 mt-1">
+                    <span>Slow</span><span>Normal</span><span>Fast</span>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-xs text-gray-500 uppercase tracking-wider mb-2 block">
+                    Pitch: {voicePitch.toFixed(2)}
+                  </label>
+                  <input
+                    type="range" min="0.5" max="1.5" step="0.05"
+                    value={voicePitch}
+                    onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
+                    className="w-full accent-[#9C213F]"
+                  />
+                  <div className="flex justify-between text-xs text-gray-600 mt-1">
+                    <span>Deep</span><span>Normal</span><span>High</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Preview text */}
+              <div>
+                <label className="text-xs text-gray-500 uppercase tracking-wider mb-2 block">Preview Text</label>
+                <textarea
+                  value={previewText}
+                  onChange={(e) => setPreviewText(e.target.value)}
+                  rows={3}
+                  className="w-full p-4 rounded-xl input-dark text-sm resize-none"
+                />
+              </div>
+
+              {/* Action buttons */}
+              <div className="flex gap-3">
+                <button
+                  onClick={previewVoice}
+                  className="px-6 py-3 rounded-xl btn-glass text-sm font-medium flex items-center gap-2"
+                >
+                  🔊 Preview Voice
+                </button>
+                <button
+                  onClick={stopPreview}
+                  className="px-6 py-3 rounded-xl btn-glass text-sm font-medium text-gray-400"
+                >
+                  ⏹ Stop
+                </button>
+                <button
+                  onClick={saveVoiceSettings}
+                  disabled={voiceSaving}
+                  className="px-6 py-3 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50 flex items-center gap-2"
+                >
+                  {voiceSaved ? '✓ Saved!' : voiceSaving ? 'Saving...' : '💾 Save Settings'}
+                </button>
+              </div>
+            </div>
+
+            {/* Available voices list */}
+            <div className="glass-card p-6">
+              <h4 className="text-sm font-semibold text-[#D4A843] mb-4">All Available Voices ({voices.length})</h4>
+              <div className="max-h-80 overflow-y-auto space-y-1">
+                {voices.map((v) => (
+                  <div
+                    key={v.name}
+                    onClick={() => setSelectedVoice(v.name)}
+                    className={`flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer transition-all ${
+                      selectedVoice === v.name
+                        ? 'bg-[#9C213F]/20 border border-[#9C213F]/30'
+                        : 'hover:bg-white/[0.03] border border-transparent'
+                    }`}
+                  >
+                    <div>
+                      <span className="text-sm font-medium">{v.name}</span>
+                      <span className="text-xs text-gray-500 ml-2">{v.lang}</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {!v.localService && <span className="text-xs text-gray-600">☁️</span>}
+                      {selectedVoice === v.name && <span className="text-[#9C213F]">●</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}
