@@ -20,18 +20,23 @@ export default function DisplayPage() {
   const [time, setTime] = useState(new Date());
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
+  const [voiceReady, setVoiceReady] = useState(false);
+  const [needsActivation, setNeedsActivation] = useState(true);
   const videoRef = useRef<HTMLVideoElement>(null);
   const announcementQueue = useRef<ServingTicket[]>([]);
   const speaking = useRef(false);
   const bestVoice = useRef<SpeechSynthesisVoice | null>(null);
   const voiceSettings = useRef<{ rate: number; pitch: number }>({ rate: 0.85, pitch: 1.05 });
 
-  // Load voice settings
+  // Load voice settings & voices
   useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
+
     const loadVoices = async () => {
       const allVoices = window.speechSynthesis.getVoices();
       if (allVoices.length === 0) return;
+
+      // Fetch saved voice settings from API
       try {
         const res = await fetch('/api/settings');
         const settings = await res.json();
@@ -39,19 +44,27 @@ export default function DisplayPage() {
         if (settings.voicePitch) voiceSettings.current.pitch = parseFloat(settings.voicePitch);
         if (settings.voiceName) {
           const saved = allVoices.find((v) => v.name === settings.voiceName);
-          if (saved) { bestVoice.current = saved; return; }
+          if (saved) { bestVoice.current = saved; setVoiceReady(true); return; }
         }
       } catch (e) { console.error(e); }
+
+      // Fallback: auto-detect best voice
       const preferred = ['Google UK English Female','Microsoft Zira','Samantha','Google US English','Microsoft David'];
       for (const name of preferred) {
         const v = allVoices.find((voice) => voice.name.includes(name));
-        if (v) { bestVoice.current = v; return; }
+        if (v) { bestVoice.current = v; setVoiceReady(true); return; }
       }
       const eng = allVoices.find((v) => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak'));
       bestVoice.current = eng || allVoices[0];
+      setVoiceReady(true);
     };
+
     loadVoices();
     window.speechSynthesis.onvoiceschanged = loadVoices;
+
+    // Chrome bug: voices may not load until we try to use speechSynthesis
+    setTimeout(loadVoices, 500);
+    setTimeout(loadVoices, 1500);
   }, []);
 
   // Load videos from settings
@@ -85,19 +98,57 @@ export default function DisplayPage() {
     return () => clearInterval(t);
   }, []);
 
+  // Activate audio on user click (required by browsers)
+  const activateAudio = () => {
+    if (typeof window === 'undefined' || !window.speechSynthesis) return;
+    // Speak empty string to unlock audio context
+    const utterance = new SpeechSynthesisUtterance('');
+    utterance.volume = 0;
+    window.speechSynthesis.speak(utterance);
+    setNeedsActivation(false);
+    // Also try to play video
+    if (videoRef.current) {
+      videoRef.current.muted = false;
+      videoRef.current.muted = true; // keep muted but unlock
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
   const speakText = useCallback((text: string): Promise<void> => {
     return new Promise((resolve) => {
       if (typeof window === 'undefined' || !window.speechSynthesis) { resolve(); return; }
+      // Cancel any stuck speech
       window.speechSynthesis.cancel();
+
       const utterance = new SpeechSynthesisUtterance(text);
       utterance.lang = 'en-US';
       utterance.rate = voiceSettings.current.rate;
       utterance.pitch = voiceSettings.current.pitch;
       utterance.volume = 1;
       if (bestVoice.current) utterance.voice = bestVoice.current;
+
       utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
-      window.speechSynthesis.speak(utterance);
+      utterance.onerror = (e) => {
+        console.error('Speech error:', e);
+        resolve();
+      };
+
+      // Chrome bug: speechSynthesis can get stuck, resume it
+      window.speechSynthesis.cancel();
+      setTimeout(() => {
+        window.speechSynthesis.speak(utterance);
+        // Chrome bug: long text gets stuck, keep poking it
+        const interval = setInterval(() => {
+          if (!window.speechSynthesis.speaking) {
+            clearInterval(interval);
+          } else {
+            window.speechSynthesis.pause();
+            window.speechSynthesis.resume();
+          }
+        }, 5000);
+        utterance.onend = () => { clearInterval(interval); resolve(); };
+        utterance.onerror = () => { clearInterval(interval); resolve(); };
+      }, 100);
     });
   }, []);
 
@@ -161,7 +212,27 @@ export default function DisplayPage() {
   const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to AUIB — Queue Management System';
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-black">
+    <div className="h-screen flex flex-col overflow-hidden bg-black" onClick={needsActivation ? activateAudio : undefined}>
+
+      {/* Activation overlay */}
+      {needsActivation && (
+        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center cursor-pointer" onClick={activateAudio}>
+          <div className="text-center animate-pulse">
+            <div className="text-6xl mb-6">🔊</div>
+            <div className="text-2xl font-bold text-white mb-2">Click anywhere to activate</div>
+            <div className="text-gray-400">Voice announcements require user interaction to start</div>
+          </div>
+        </div>
+      )}
+
+      {/* Voice status indicator */}
+      {!needsActivation && (
+        <div className="fixed top-2 left-2 z-50 flex items-center gap-1.5 bg-black/50 backdrop-blur rounded-full px-3 py-1">
+          <div className={`w-2 h-2 rounded-full ${voiceReady ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
+          <span className="text-[10px] text-gray-400">{voiceReady ? 'Voice Ready' : 'Loading voice...'}</span>
+        </div>
+      )}
+
       {/* ===== TOP BAR — AUIB Branding ===== */}
       <div className="flex items-center justify-between px-8 py-3 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
         <div className="flex items-center gap-4">
@@ -191,6 +262,7 @@ export default function DisplayPage() {
               className="absolute inset-0 w-full h-full object-cover"
               muted
               autoPlay
+              playsInline
               onEnded={handleVideoEnded}
             >
               <source src={videos[currentVideoIndex]?.url} />
