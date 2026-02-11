@@ -12,29 +12,90 @@ export default function DisplayPage() {
   const [waiting, setWaiting] = useState<number[]>([]);
   const [latestCall, setLatestCall] = useState<ServingTicket | null>(null);
   const [animate, setAnimate] = useState(false);
+  const [time, setTime] = useState(new Date());
   const announcementQueue = useRef<ServingTicket[]>([]);
   const speaking = useRef(false);
+  const voicesLoaded = useRef(false);
+  const bestVoice = useRef<SpeechSynthesisVoice | null>(null);
 
-  const speak = useCallback((text: string) => {
+  // Find best voice
+  useEffect(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
-    utterance.rate = 0.9;
-    utterance.pitch = 1;
-    utterance.volume = 1;
-    utterance.onend = () => {
-      speaking.current = false;
-      processQueue();
+
+    const loadVoices = () => {
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length === 0) return;
+      voicesLoaded.current = true;
+
+      const preferred = [
+        'Google UK English Female',
+        'Google UK English Male',
+        'Microsoft Zira',
+        'Microsoft Susan',
+        'Samantha',
+        'Karen',
+        'Daniel',
+        'Moira',
+        'Tessa',
+        'Google US English',
+        'Microsoft David',
+      ];
+
+      for (const name of preferred) {
+        const v = voices.find((voice) => voice.name.includes(name));
+        if (v) { bestVoice.current = v; return; }
+      }
+
+      // Fallback: pick first English voice that's not espeak
+      const english = voices.find(
+        (v) => v.lang.startsWith('en') && !v.name.toLowerCase().includes('espeak')
+      );
+      bestVoice.current = english || voices[0];
     };
-    speaking.current = true;
-    window.speechSynthesis.speak(utterance);
+
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
   }, []);
 
-  const processQueue = useCallback(() => {
+  // Clock
+  useEffect(() => {
+    const t = setInterval(() => setTime(new Date()), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  const speakText = useCallback((text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined' || !window.speechSynthesis) { resolve(); return; }
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'en-US';
+      utterance.rate = 0.85;
+      utterance.pitch = 1.05;
+      utterance.volume = 1;
+      if (bestVoice.current) utterance.voice = bestVoice.current;
+      utterance.onend = () => resolve();
+      utterance.onerror = () => resolve();
+      window.speechSynthesis.speak(utterance);
+    });
+  }, []);
+
+  const processQueue = useCallback(async () => {
     if (speaking.current || announcementQueue.current.length === 0) return;
+    speaking.current = true;
     const next = announcementQueue.current.shift()!;
-    speak(`Now serving ticket number ${next.ticketNumber} at counter ${next.counterNumber}`);
-  }, [speak]);
+
+    // Small dramatic pause
+    await new Promise((r) => setTimeout(r, 300));
+    // First announcement
+    await speakText(`Ticket ${next.ticketNumber}... Counter ${next.counterNumber}`);
+    // Pause between repeats
+    await new Promise((r) => setTimeout(r, 1500));
+    // Second announcement
+    await speakText(`Ticket ${next.ticketNumber}... Counter ${next.counterNumber}`);
+
+    speaking.current = false;
+    processQueue();
+  }, [speakText]);
 
   const announce = useCallback((ticket: ServingTicket) => {
     announcementQueue.current.push(ticket);
@@ -66,7 +127,7 @@ export default function DisplayPage() {
       const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber };
       setLatestCall(call);
       setAnimate(true);
-      setTimeout(() => setAnimate(false), 3000);
+      setTimeout(() => setAnimate(false), 4000);
       announce(call);
       fetchTickets();
     });
@@ -76,7 +137,7 @@ export default function DisplayPage() {
       const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber };
       setLatestCall(call);
       setAnimate(true);
-      setTimeout(() => setAnimate(false), 3000);
+      setTimeout(() => setAnimate(false), 4000);
       announce(call);
     });
 
@@ -92,85 +153,119 @@ export default function DisplayPage() {
   }, [fetchTickets, announce]);
 
   return (
-    <div className="min-h-screen bg-[#273237] text-white flex flex-col overflow-hidden">
+    <div className="h-screen flex flex-col overflow-hidden" style={{ background: 'linear-gradient(160deg, #111a1f 0%, #273237 40%, #1a2328 100%)' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-8 py-4 bg-[#1a2328] border-b border-[#9C213F]/30">
-        <div className="flex items-center gap-4">
-          <div className="text-4xl font-bold text-[#9C213F]">AUIB</div>
-          <div className="text-xl text-gray-300">Queue Management System</div>
+      <div className="flex items-center justify-between px-10 py-5 border-b border-white/5">
+        <div className="flex items-center gap-5">
+          <div className="text-5xl font-black text-[#9C213F] tracking-tight">AUIB</div>
+          <div className="h-8 w-px bg-white/10" />
+          <div className="text-xl text-gray-400 font-light tracking-wide">Queue Management System</div>
         </div>
-        <div className="text-lg text-gray-400">
-          {new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+        <div className="text-right">
+          <div className="text-2xl font-semibold text-white tabular-nums">
+            {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
+          </div>
+          <div className="text-sm text-gray-500">
+            {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          </div>
         </div>
       </div>
 
-      <div className="flex flex-1 gap-6 p-6">
+      <div className="flex flex-1 gap-6 p-6 min-h-0">
         {/* Left side - Now Serving */}
-        <div className="flex-1 flex flex-col gap-6">
-          {/* Main announcement */}
-          <div className={`flex-1 rounded-3xl bg-gradient-to-br from-[#1a2328] to-[#273237] border border-white/10 backdrop-blur-xl flex flex-col items-center justify-center relative overflow-hidden ${animate ? 'ring-4 ring-[#9C213F] ring-opacity-50' : ''}`}
-            style={{ transition: 'all 0.5s ease' }}>
-            <div className="absolute inset-0 bg-gradient-to-br from-[#9C213F]/5 to-transparent" />
+        <div className="flex-1 flex flex-col gap-5 min-w-0">
+          {/* Main announcement card */}
+          <div
+            className={`flex-1 glass-card flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 ${
+              animate ? 'animate-glow-pulse border-[#9C213F]/40' : ''
+            }`}
+          >
+            {/* Decorative gradient */}
+            <div className="absolute inset-0 bg-gradient-to-br from-[#9C213F]/8 via-transparent to-[#D4A843]/5 pointer-events-none" />
+
             {latestCall ? (
-              <div className={`relative z-10 text-center ${animate ? 'animate-pulse' : ''}`}>
-                <div className="text-2xl text-gray-400 mb-2">NOW SERVING</div>
-                <div className="text-[10rem] font-black leading-none text-white drop-shadow-2xl" 
-                  style={{ textShadow: '0 0 40px rgba(156,33,63,0.5)' }}>
+              <div className={`relative z-10 text-center ${animate ? 'animate-slide-up' : ''}`}>
+                <div className="text-2xl font-medium tracking-[0.3em] uppercase text-[#D4A843] mb-4 animate-breathe">
+                  Now Serving
+                </div>
+                <div
+                  className={`text-[12rem] font-black leading-none text-white ${animate ? 'animate-number-glow' : ''}`}
+                  style={{ textShadow: '0 0 40px rgba(156,33,63,0.5), 0 4px 20px rgba(0,0,0,0.5)' }}
+                >
                   {latestCall.ticketNumber}
                 </div>
-                <div className="mt-4 text-3xl text-[#9C213F] font-semibold">
-                  Counter {latestCall.counterNumber}
+                <div className="mt-6 inline-flex items-center gap-3 px-8 py-3 rounded-full bg-[#9C213F]/20 border border-[#9C213F]/30">
+                  <div className="w-2.5 h-2.5 rounded-full bg-[#9C213F] animate-breathe" />
+                  <span className="text-2xl font-semibold text-[#9C213F]">Counter {latestCall.counterNumber}</span>
                 </div>
               </div>
             ) : (
-              <div className="relative z-10 text-center text-gray-500">
-                <div className="text-4xl">Waiting for first ticket...</div>
+              <div className="relative z-10 text-center">
+                <div className="text-6xl mb-4 opacity-30">🏦</div>
+                <div className="text-3xl text-gray-500 font-light">Waiting for tickets...</div>
+                <div className="text-gray-600 mt-2">The queue is currently empty</div>
               </div>
             )}
           </div>
 
-          {/* All serving counters */}
-          <div className="grid grid-cols-3 gap-4">
-            {serving.map((s) => (
-              <div key={s.counterNumber} 
-                className="rounded-2xl bg-[#1a2328]/80 border border-white/10 backdrop-blur-xl p-6 text-center">
-                <div className="text-sm text-gray-400">Counter {s.counterNumber}</div>
-                <div className="text-5xl font-bold text-[#9C213F] mt-1">{s.ticketNumber}</div>
-              </div>
-            ))}
-          </div>
+          {/* Active counters grid */}
+          {serving.length > 0 && (
+            <div className="grid grid-cols-4 gap-3">
+              {serving.map((s, i) => (
+                <div
+                  key={s.counterNumber}
+                  className="glass-card-sm p-5 text-center animate-slide-up"
+                  style={{ animationDelay: `${i * 0.05}s` }}
+                >
+                  <div className="text-xs font-medium tracking-wider uppercase text-gray-500 mb-1">
+                    Counter {s.counterNumber}
+                  </div>
+                  <div className="text-4xl font-bold text-[#9C213F]">{s.ticketNumber}</div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
-        {/* Right side - Queue + Video */}
-        <div className="w-96 flex flex-col gap-6">
+        {/* Right side */}
+        <div className="w-[360px] flex flex-col gap-5 flex-shrink-0">
           {/* Waiting queue */}
-          <div className="flex-1 rounded-3xl bg-[#1a2328]/80 border border-white/10 backdrop-blur-xl p-6 overflow-hidden">
-            <h2 className="text-xl font-semibold text-[#9C213F] mb-4">Upcoming</h2>
-            <div className="space-y-3 overflow-y-auto max-h-[40vh]">
+          <div className="flex-1 glass-card p-6 flex flex-col min-h-0">
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-lg font-semibold text-[#D4A843] tracking-wide uppercase">Upcoming</h2>
+              <span className="text-sm text-gray-500 bg-white/5 px-3 py-1 rounded-full">{waiting.length} waiting</span>
+            </div>
+            <div className="space-y-2 overflow-y-auto flex-1 pr-1">
               {waiting.length === 0 ? (
-                <div className="text-gray-500 text-center py-8">No tickets waiting</div>
+                <div className="text-gray-600 text-center py-12">
+                  <div className="text-4xl mb-2 opacity-40">✨</div>
+                  No tickets waiting
+                </div>
               ) : (
-                waiting.slice(0, 15).map((num, i) => (
-                  <div key={num}
-                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/5 border border-white/5"
-                    style={{ animationDelay: `${i * 0.05}s` }}>
-                    <span className="text-gray-400">#{i + 1}</span>
-                    <span className="text-2xl font-bold">{num}</span>
+                waiting.slice(0, 20).map((num, i) => (
+                  <div
+                    key={num}
+                    className="flex items-center justify-between px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.04] hover:bg-white/[0.06] transition-colors animate-ticket-in"
+                    style={{ animationDelay: `${i * 0.04}s` }}
+                  >
+                    <span className="text-sm text-gray-500 font-mono">#{i + 1}</span>
+                    <span className="text-xl font-bold tabular-nums">{num}</span>
                   </div>
                 ))
               )}
+              {waiting.length > 20 && (
+                <div className="text-center text-gray-500 text-sm py-2">+{waiting.length - 20} more</div>
+              )}
             </div>
-            {waiting.length > 15 && (
-              <div className="text-center text-gray-500 mt-3">+{waiting.length - 15} more</div>
-            )}
           </div>
 
-          {/* Video placeholder */}
-          <div className="h-56 rounded-3xl bg-[#1a2328]/80 border border-white/10 backdrop-blur-xl overflow-hidden flex items-center justify-center">
-            <div className="text-center text-gray-500">
-              <div className="text-5xl mb-2">🎓</div>
-              <div className="text-sm">AUIB Promo Video</div>
-              <div className="text-xs text-gray-600 mt-1">Place video here</div>
+          {/* Video / promo area */}
+          <div className="h-52 glass-card overflow-hidden flex items-center justify-center relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-[#9C213F]/5 to-[#D4A843]/5" />
+            <div className="text-center relative z-10">
+              <div className="text-5xl mb-3">🎓</div>
+              <div className="text-sm text-gray-400 font-medium">AUIB Promotional</div>
+              <div className="text-xs text-gray-600 mt-1">Video area</div>
             </div>
           </div>
         </div>

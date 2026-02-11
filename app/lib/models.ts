@@ -32,5 +32,37 @@ const CounterSchema = new Schema<ICounter>({
   status: { type: String, enum: ['open', 'closed'], default: 'open' },
 });
 
+export interface IEmployee extends Document {
+  username: string;
+  password: string;
+  name: string;
+  counterNumber: number;
+  role: 'employee' | 'admin';
+  active: boolean;
+}
+
+const EmployeeSchema = new Schema<IEmployee>({
+  username: { type: String, required: true, unique: true },
+  password: { type: String, required: true },
+  name: { type: String, required: true },
+  counterNumber: { type: Number, required: true, unique: true },
+  role: { type: String, enum: ['employee', 'admin'], default: 'employee' },
+  active: { type: Boolean, default: true },
+});
+
+export interface ISession extends Document {
+  token: string;
+  employeeId: mongoose.Types.ObjectId;
+  createdAt: Date;
+}
+
+const SessionSchema = new Schema<ISession>({
+  token: { type: String, required: true, unique: true },
+  employeeId: { type: Schema.Types.ObjectId, ref: 'Employee', required: true },
+  createdAt: { type: Date, default: Date.now, expires: 86400 },
+});
+
 export const Ticket = mongoose.models.Ticket || mongoose.model<ITicket>('Ticket', TicketSchema);
 export const Counter = mongoose.models.Counter || mongoose.model<ICounter>('Counter', CounterSchema);
+export const Employee = mongoose.models.Employee || mongoose.model<IEmployee>('Employee', EmployeeSchema);
+export const Session = mongoose.models.Session || mongoose.model<ISession>('Session', SessionSchema);
