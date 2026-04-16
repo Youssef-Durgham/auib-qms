@@ -17,7 +17,9 @@
       "WebFetch(domain:auib.edu.iq)",
       "WebSearch",
       "WebFetch(domain:brandfetch.com)",
-      "WebFetch(domain:en.wikipedia.org)"
+      "WebFetch(domain:en.wikipedia.org)",
+      "Bash(powershell -NoProfile -Command \"Get-Content 'C:\\\\Users\\\\Administrator\\\\Documents\\\\Custom Application\\\\auib-qms\\\\print-agent\\\\print-agent.ps1' | Measure-Object -Line\")",
+      "Bash(powershell *)"
     ]
   }
 }

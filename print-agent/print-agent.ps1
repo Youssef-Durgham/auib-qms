@@ -11,10 +11,6 @@ $ListenPort  = 9100
 $ScriptDir   = Split-Path -Parent $MyInvocation.MyCommand.Definition
 $ConfigPath  = Join-Path $ScriptDir "config.txt"
 $LogPath     = Join-Path $ScriptDir "agent.log"
-$LogoPath    = Join-Path $ScriptDir "auib-logo.png"
-$LogoCache   = Join-Path $ScriptDir "auib-logo.esc"
-$LogoWidthPx = 240   # ~33mm wide on 80mm thermal
-
 function Log-Line([string]$msg) {
     $line = ("{0}  {1}" -f (Get-Date -Format "yyyy-MM-dd HH:mm:ss"), $msg)
     Write-Host $line
@@ -31,86 +27,6 @@ Log-Line "AUIB Print Agent starting. Printer='$PrinterName', Port=$ListenPort"
 # --- Load JavaScriptSerializer (works on PS 2.0) ---------------------------
 Add-Type -AssemblyName System.Web.Extensions
 $serializer = New-Object System.Web.Script.Serialization.JavaScriptSerializer
-
-# --- Load & encode the AUIB logo as ESC/POS raster (GS v 0) ----------------
-$LogoEscpos = $null
-function Encode-LogoEscpos([string]$imgPath, [int]$targetWidth) {
-    try {
-        Add-Type -AssemblyName System.Drawing
-    } catch {
-        Log-Line "System.Drawing unavailable; skipping logo"
-        return $null
-    }
-    if (-not (Test-Path $imgPath)) { Log-Line "Logo file not found: $imgPath"; return $null }
-
-    try {
-        $src = [System.Drawing.Image]::FromFile($imgPath)
-        $ratio = $targetWidth / [double]$src.Width
-        $targetHeight = [int][Math]::Round($src.Height * $ratio)
-        # Thermal printer raster width must be a multiple of 8 dots.
-        if (($targetWidth % 8) -ne 0) { $targetWidth = ([int]($targetWidth / 8)) * 8 }
-
-        $bmp = New-Object System.Drawing.Bitmap $targetWidth, $targetHeight
-        $g = [System.Drawing.Graphics]::FromImage($bmp)
-        $g.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
-        $g.SmoothingMode     = [System.Drawing.Drawing2D.SmoothingMode]::HighQuality
-        $g.PixelOffsetMode   = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality
-        $g.Clear([System.Drawing.Color]::White)
-        $g.DrawImage($src, 0, 0, $targetWidth, $targetHeight)
-        $g.Dispose()
-        $src.Dispose()
-
-        $widthBytes = [int]($targetWidth / 8)
-        $raster = New-Object byte[] ($widthBytes * $targetHeight)
-
-        # Fast pixel access via LockBits — O(w*h) but in raw memory,
-        # 100-1000x faster than GetPixel in PowerShell 2.0.
-        $rect = New-Object System.Drawing.Rectangle 0, 0, $targetWidth, $targetHeight
-        $data = $bmp.LockBits($rect, [System.Drawing.Imaging.ImageLockMode]::ReadOnly, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
-        try {
-            $stride = $data.Stride
-            $totalBytes = $stride * $targetHeight
-            $buffer = New-Object byte[] $totalBytes
-            [System.Runtime.InteropServices.Marshal]::Copy($data.Scan0, $buffer, 0, $totalBytes)
-        } finally {
-            $bmp.UnlockBits($data)
-        }
-        $bmp.Dispose()
-
-        # Buffer is BGRA. Threshold each pixel (below = black = print dot).
-        for ($y = 0; $y -lt $targetHeight; $y++) {
-            $rowOff = $y * $stride
-            $rastRow = $y * $widthBytes
-            for ($x = 0; $x -lt $targetWidth; $x++) {
-                $off = $rowOff + ($x -shl 2)
-                $luma = ($buffer[$off + 2] * 299 + $buffer[$off + 1] * 587 + $buffer[$off] * 114) / 1000
-                if ($luma -lt 170) {
-                    $raster[$rastRow + ($x -shr 3)] = [byte]($raster[$rastRow + ($x -shr 3)] -bor (1 -shl (7 - ($x -band 7))))
-                }
-            }
-        }
-
-        $xL = [byte]($widthBytes -band 0xFF)
-        $xH = [byte](($widthBytes -shr 8) -band 0xFF)
-        $yL = [byte]($targetHeight -band 0xFF)
-        $yH = [byte](($targetHeight -shr 8) -band 0xFF)
-
-        $out = New-Object System.Collections.Generic.List[byte]
-        [void]$out.Add(0x1B); [void]$out.Add(0x61); [void]$out.Add(0x01)  # centre
-        [void]$out.Add(0x1D); [void]$out.Add(0x76); [void]$out.Add(0x30); [void]$out.Add(0x00)
-        [void]$out.Add($xL);  [void]$out.Add($xH);  [void]$out.Add($yL);  [void]$out.Add($yH)
-        foreach ($b in $raster) { [void]$out.Add($b) }
-        [void]$out.Add(0x0A)  # line feed after image
-        Log-Line ("Logo encoded: {0}x{1} px" -f $targetWidth, $targetHeight)
-        return ,($out.ToArray())
-    } catch {
-        Log-Line ("Logo encode failed: " + $_.Exception.Message)
-        return $null
-    }
-}
-
-# NOTE: logo encoding happens AFTER the HTTP listener starts so the health
-# endpoint responds immediately even if encoding takes a moment.
 
 # --- Win32 RAW printer API bindings ----------------------------------------
 $typeSrc = @"
@@ -187,72 +103,36 @@ function Build-TicketBytes($number, $category, $date, $time, $position) {
     Add-Bytes $buf @(0x1B, 0x40)                 # ESC @ - init
     Add-Bytes $buf @(0x1B, 0x61, 0x01)           # centre
 
-    # --- Logo (centred) ----------------------------------------------------
-    if ($LogoEscpos) { Add-Bytes $buf $LogoEscpos }
-
-    # --- University name ---------------------------------------------------
-    Add-Bytes $buf @(0x1D, 0x21, 0x01)           # double height
-    Add-Bytes $buf @(0x1B, 0x45, 0x01)           # bold
+    Add-Bytes $buf @(0x1D, 0x21, 0x00)           # normal size
+    Add-Bytes $buf @(0x1B, 0x45, 0x01)           # bold on
     Add-Text  $buf "AUIB`n"
-    Add-Bytes $buf @(0x1D, 0x21, 0x00)
-    Add-Bytes $buf @(0x1B, 0x45, 0x00)
-    Add-Text  $buf "American University of Iraq`n"
-    Add-Text  $buf "- Baghdad -`n`n"
+    Add-Bytes $buf @(0x1B, 0x45, 0x00)           # bold off
+    Add-Text  $buf "American University in Iraq, Baghdad`n"
+    Add-Text  $buf "------------------------------`n"
+    Add-Text  $buf "YOUR TICKET`n`n"
 
-    # --- Heavy divider -----------------------------------------------------
-    Add-Text  $buf "================================`n`n"
-
-    # --- YOUR TICKET inverted banner --------------------------------------
-    Add-Bytes $buf @(0x1D, 0x42, 0x01)           # GS B 1 = reverse ON
-    Add-Bytes $buf @(0x1B, 0x45, 0x01)           # bold
-    Add-Text  $buf "     Y O U R   T I C K E T     "
-    Add-Bytes $buf @(0x1B, 0x45, 0x00)
-    Add-Bytes $buf @(0x1D, 0x42, 0x00)           # GS B 0 = reverse OFF
-    Add-Text  $buf "`n`n"
-
-    # --- Huge ticket number -----------------------------------------------
-    Add-Bytes $buf @(0x1D, 0x21, 0x77)           # 8x size (both dims)
+    Add-Bytes $buf @(0x1D, 0x21, 0x77)           # huge 8x8
     Add-Bytes $buf @(0x1B, 0x45, 0x01)
     Add-Text  $buf ("{0}`n" -f $number)
     Add-Bytes $buf @(0x1B, 0x45, 0x00)
     Add-Bytes $buf @(0x1D, 0x21, 0x00)
-    Add-Text  $buf "`n"
 
-    # --- Category pill -----------------------------------------------------
     if ($category) {
-        Add-Bytes $buf @(0x1D, 0x21, 0x11)       # 2x size
-        Add-Bytes $buf @(0x1B, 0x45, 0x01)
-        Add-Text  $buf ("> {0} <`n" -f $category)
-        Add-Bytes $buf @(0x1B, 0x45, 0x00)
-        Add-Bytes $buf @(0x1D, 0x21, 0x00)
         Add-Text  $buf "`n"
+        Add-Bytes $buf @(0x1D, 0x21, 0x11)       # medium 2x2
+        Add-Text  $buf ("[ {0} ]`n" -f $category)
+        Add-Bytes $buf @(0x1D, 0x21, 0x00)
     }
 
-    # --- Info table --------------------------------------------------------
-    Add-Text  $buf "- - - - - - - - - - - - - - - -`n"
-    Add-Bytes $buf @(0x1B, 0x61, 0x00)           # left
-    Add-Text  $buf ("  Date       : {0}`n" -f $date)
-    Add-Text  $buf ("  Time       : {0}`n" -f $time)
-    Add-Text  $buf ("  Position   : #{0}`n" -f $position)
-    Add-Bytes $buf @(0x1B, 0x61, 0x01)           # centre
-    Add-Text  $buf "- - - - - - - - - - - - - - - -`n`n"
-
-    # --- Thank you ---------------------------------------------------------
-    Add-Bytes $buf @(0x1D, 0x21, 0x11)           # 2x
-    Add-Bytes $buf @(0x1B, 0x45, 0x01)
-    Add-Text  $buf "THANK YOU`n"
-    Add-Bytes $buf @(0x1B, 0x45, 0x00)
-    Add-Bytes $buf @(0x1D, 0x21, 0x00)
     Add-Text  $buf "`n"
-    Add-Text  $buf "Please wait for your number`n"
-    Add-Text  $buf "   to be called at a counter.`n`n"
-
-    # --- Footer ------------------------------------------------------------
-    Add-Text  $buf "================================`n"
-    Add-Bytes $buf @(0x1B, 0x45, 0x01)
-    Add-Text  $buf "        auib.edu.iq`n"
-    Add-Bytes $buf @(0x1B, 0x45, 0x00)
-    Add-Text  $buf "`n`n`n"
+    Add-Bytes $buf @(0x1B, 0x61, 0x00)           # left align
+    Add-Text  $buf "------------------------------`n"
+    Add-Text  $buf ("Date     : {0}`n" -f $date)
+    Add-Text  $buf ("Time     : {0}`n" -f $time)
+    Add-Text  $buf ("Position : #{0}`n" -f $position)
+    Add-Text  $buf "------------------------------`n"
+    Add-Bytes $buf @(0x1B, 0x61, 0x01)
+    Add-Text  $buf "Thank you`n`n`n`n"
 
     Add-Bytes $buf @(0x1D, 0x56, 0x01)           # partial cut
 
@@ -284,35 +164,6 @@ try {
     exit 1
 }
 Log-Line "Agent ONLINE at http://localhost:$ListenPort"
-
-# Prefer cached encoded logo (instant). Only re-encode if cache is missing
-# or the source PNG is newer than the cache.
-$LogoEscpos = $null
-$needEncode = $true
-if ((Test-Path $LogoCache) -and (Test-Path $LogoPath)) {
-    $cacheTime = (Get-Item $LogoCache).LastWriteTimeUtc
-    $pngTime   = (Get-Item $LogoPath).LastWriteTimeUtc
-    if ($cacheTime -ge $pngTime) {
-        try {
-            $LogoEscpos = [System.IO.File]::ReadAllBytes($LogoCache)
-            Log-Line ("Logo loaded from cache ({0} bytes)" -f $LogoEscpos.Length)
-            $needEncode = $false
-        } catch {
-            Log-Line ("Cache read failed: " + $_.Exception.Message)
-        }
-    }
-}
-if ($needEncode) {
-    $LogoEscpos = Encode-LogoEscpos $LogoPath $LogoWidthPx
-    if ($LogoEscpos) {
-        try {
-            [System.IO.File]::WriteAllBytes($LogoCache, $LogoEscpos)
-            Log-Line "Logo cache written"
-        } catch {
-            Log-Line ("Cache write failed: " + $_.Exception.Message)
-        }
-    }
-}
 
 while ($listener.IsListening) {
     try {
