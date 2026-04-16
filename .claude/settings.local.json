@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pm2 list *)",
+      "Bash(netstat -ano)",
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(pm2 start *)",
+      "Bash(pm2 logs *)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:3070/)",
+      "Bash(pm2 save *)",
+      "Bash(netsh advfirewall *)",
+      "Bash(ipconfig)",
+      "Bash(curl *)",
+      "Bash(pm2 reload *)",
+      "Bash(powershell -Command \"Get-Printer | Select-Object Name,DriverName,PortName | Format-Table -AutoSize\")",
+      "WebFetch(domain:auib.edu.iq)",
+      "WebSearch",
+      "WebFetch(domain:brandfetch.com)",
+      "WebFetch(domain:en.wikipedia.org)"
+    ]
+  }
+}

@@ -22,7 +22,7 @@ export default function DisplayPage() {
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
   const [voiceReady, setVoiceReady] = useState(false);
-  const [needsActivation, setNeedsActivation] = useState(true);
+  const [needsActivation, setNeedsActivation] = useState(false);
   const [avgServeTime, setAvgServeTime] = useState(5);
   const [customMessages, setCustomMessages] = useState<string[]>([]);
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -161,19 +161,39 @@ export default function DisplayPage() {
     return () => clearInterval(interval);
   }, []);
 
-  const activateAudio = () => {
+  const activateAudio = useCallback(() => {
     if (typeof window === 'undefined' || !window.speechSynthesis) return;
-    const utterance = new SpeechSynthesisUtterance('');
-    utterance.volume = 0;
-    window.speechSynthesis.speak(utterance);
-    audioCtx.current = new AudioContext();
+    try {
+      const utterance = new SpeechSynthesisUtterance('');
+      utterance.volume = 0;
+      window.speechSynthesis.speak(utterance);
+    } catch {}
+    try {
+      if (!audioCtx.current) audioCtx.current = new AudioContext();
+      if (audioCtx.current.state === 'suspended') audioCtx.current.resume().catch(() => {});
+    } catch {}
     setNeedsActivation(false);
     if (videoRef.current) {
       videoRef.current.muted = false;
       videoRef.current.muted = true;
       videoRef.current.play().catch(() => {});
     }
-  };
+  }, []);
+
+  // Auto-activate on mount; if browser blocks it (no autoplay flag), activate
+  // on the first user interaction anywhere on the page.
+  useEffect(() => {
+    activateAudio();
+    const handler = () => activateAudio();
+    window.addEventListener('click', handler, { once: true });
+    window.addEventListener('keydown', handler, { once: true });
+    window.addEventListener('touchstart', handler, { once: true });
+    return () => {
+      window.removeEventListener('click', handler);
+      window.removeEventListener('keydown', handler);
+      window.removeEventListener('touchstart', handler);
+    };
+  }, [activateAudio]);
 
   const speakText = useCallback((text: string): Promise<void> => {
     return new Promise((resolve) => {
@@ -275,41 +295,27 @@ export default function DisplayPage() {
   const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to AUIB — Queue Management System | مرحباً بكم في الجامعة الأمريكية في العراق، بغداد';
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-black" onClick={needsActivation ? activateAudio : undefined}>
+    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-[#fbfaf7] to-white">
 
-      {needsActivation && (
-        <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center cursor-pointer" onClick={activateAudio}>
-          <div className="text-center animate-pulse">
-            <div className="text-6xl mb-6">🔊</div>
-            <div className="text-2xl font-bold text-white mb-2">Click anywhere to activate</div>
-            <div className="text-gray-400">Voice announcements require user interaction to start</div>
-          </div>
-        </div>
-      )}
+      <div className="fixed top-2 left-2 z-50 flex items-center gap-1.5 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-3 py-1 shadow-sm">
+        <div className={`w-2 h-2 rounded-full ${voiceReady ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
+        <span className="text-[10px] text-gray-600">{voiceReady ? 'Voice Ready' : 'Loading voice...'}</span>
+      </div>
 
-      {!needsActivation && (
-        <div className="fixed top-2 left-2 z-50 flex items-center gap-1.5 bg-black/50 backdrop-blur rounded-full px-3 py-1">
-          <div className={`w-2 h-2 rounded-full ${voiceReady ? 'bg-green-400' : 'bg-yellow-400 animate-pulse'}`} />
-          <span className="text-[10px] text-gray-400">{voiceReady ? 'Voice Ready' : 'Loading voice...'}</span>
-        </div>
-      )}
-
-      {/* Fullscreen button (Feature 12) */}
-      {!needsActivation && (
-        <button
-          onClick={toggleFullscreen}
-          className={`fixed top-2 right-2 z-50 bg-black/50 backdrop-blur rounded-full px-3 py-1.5 text-xs text-gray-400 hover:text-white transition-all ${isFullscreen ? 'opacity-0 hover:opacity-100' : ''}`}
-        >
-          {isFullscreen ? '⊞' : '⛶'} {isFullscreen ? 'Exit' : 'Fullscreen'}
-        </button>
-      )}
+      <button
+        onClick={toggleFullscreen}
+        className={`fixed top-2 right-2 z-50 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-3 py-1.5 text-xs text-gray-600 hover:text-[#9C213F] shadow-sm transition-all ${isFullscreen ? 'opacity-0 hover:opacity-100' : ''}`}
+      >
+        {isFullscreen ? '⊞' : '⛶'} {isFullscreen ? 'Exit' : 'Fullscreen'}
+      </button>
 
       {/* TOP BAR */}
       <div className="flex items-center justify-between px-8 py-3 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
         <div className="flex items-center gap-4">
-          <div className="text-3xl font-black text-white tracking-tight">AUIB</div>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/auib-logo.png" alt="AUIB" className="h-9 w-auto bg-white/95 rounded-md px-2 py-1" />
           <div className="h-6 w-px bg-white/30" />
-          <div className="text-sm text-white/80 font-medium tracking-wide">American University in Iraq, Baghdad</div>
+          <div className="text-sm text-white/90 font-medium tracking-wide">American University in Iraq, Baghdad</div>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-white/90 text-sm font-medium">
@@ -325,28 +331,29 @@ export default function DisplayPage() {
       {/* MAIN CONTENT */}
       <div className="flex-1 flex min-h-0">
         {/* LEFT: Video Area */}
-        <div className="flex-1 relative bg-[#0a0f12]">
+        <div className="flex-1 relative bg-gray-100">
           {videos.length > 0 ? (
             <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted autoPlay playsInline onEnded={handleVideoEnded}>
               <source src={videos[currentVideoIndex]?.url} />
             </video>
           ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-[#1a2328] to-[#0a0f12]">
+            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white to-[#fbfaf7]">
               <div className="text-center">
-                <div className="text-8xl font-black text-[#9C213F]/20 tracking-tight">AUIB</div>
-                <div className="text-gray-600 mt-2">Video will appear here</div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src="/auib-logo.png" alt="AUIB" className="mx-auto h-28 w-auto opacity-80" />
+                <div className="text-gray-400 mt-4 text-sm tracking-[0.25em] uppercase">Video will appear here</div>
               </div>
             </div>
           )}
-          <div className="absolute top-4 right-4 bg-black/40 backdrop-blur-sm rounded-lg px-3 py-1.5">
-            <span className="text-white/60 text-xs font-bold tracking-wider">AUIB</span>
+          <div className="absolute top-4 right-4 bg-white/80 border border-gray-200 shadow-sm backdrop-blur-sm rounded-lg px-3 py-1.5">
+            <span className="text-[#9C213F] text-xs font-black tracking-wider">AUIB</span>
           </div>
         </div>
 
         {/* RIGHT: Queue Panel */}
-        <div className="w-[380px] flex flex-col bg-[#111a1f] border-l border-[#9C213F]/20">
+        <div className="w-[380px] flex flex-col bg-white border-l border-[#9C213F]/15">
           {/* Now Serving — bilingual */}
-          <div className={`relative p-6 transition-all duration-700 ${animate ? 'bg-[#9C213F]/10' : ''}`}>
+          <div className={`relative p-6 transition-all duration-700 ${animate ? 'bg-[#9C213F]/5' : ''}`}>
             <div className="absolute inset-0 bg-gradient-to-b from-[#9C213F]/5 to-transparent pointer-events-none" />
             <div className="relative z-10">
               <div className="flex items-center gap-2 mb-1">
@@ -356,48 +363,48 @@ export default function DisplayPage() {
               <div className="text-[10px] text-[#9C213F]/60 mb-3" dir="rtl">الآن يتم خدمة</div>
               {latestCall ? (
                 <div className={`${animate ? 'animate-slideInRight' : ''}`}>
-                  <div className="text-[5rem] font-black text-white leading-none" style={{ textShadow: '0 0 30px rgba(156,33,63,0.4)' }}>
+                  <div className="text-[5rem] font-black text-[#9C213F] leading-none" style={{ textShadow: '0 4px 20px rgba(156,33,63,0.18)' }}>
                     {latestCall.ticketNumber}
                   </div>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#9C213F]/20 border border-[#9C213F]/30">
+                    <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#9C213F]/10 border border-[#9C213F]/30">
                       <span className="text-lg font-semibold text-[#9C213F]">Counter {latestCall.counterNumber}</span>
                     </span>
-                    <span className="text-xs text-[#9C213F]/50" dir="rtl">الكاونتر {latestCall.counterNumber}</span>
+                    <span className="text-xs text-[#9C213F]/60" dir="rtl">الكاونتر {latestCall.counterNumber}</span>
                   </div>
                   {latestCall.category && (
-                    <div className="mt-2 text-xs text-[#D4A843]/80 px-3 py-1 rounded-full bg-[#D4A843]/10 inline-block">
+                    <div className="mt-2 text-xs text-[#8a6e2b] px-3 py-1 rounded-full bg-[#D4A843]/15 border border-[#D4A843]/40 inline-block">
                       {latestCall.category}
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-2xl text-gray-600 font-light">—</div>
+                <div className="text-2xl text-gray-300 font-light">—</div>
               )}
             </div>
           </div>
 
-          <div className="h-px bg-gradient-to-r from-transparent via-[#9C213F]/30 to-transparent" />
+          <div className="h-px bg-gradient-to-r from-transparent via-[#9C213F]/20 to-transparent" />
 
           {/* Active Counters */}
           {serving.length > 0 && (
             <>
               <div className="px-6 py-4">
                 <div className="flex items-center justify-between mb-3">
-                  <div className="text-xs font-bold tracking-[0.2em] uppercase text-[#D4A843]">Active Counters</div>
-                  <div className="text-[10px] text-[#D4A843]/50" dir="rtl">الكاونترات النشطة</div>
+                  <div className="text-xs font-bold tracking-[0.2em] uppercase text-[#8a6e2b]">Active Counters</div>
+                  <div className="text-[10px] text-[#8a6e2b]/70" dir="rtl">الكاونترات النشطة</div>
                 </div>
                 <div className="grid grid-cols-2 gap-2">
                   {serving.map((s) => (
-                    <div key={s.counterNumber} className="bg-white/[0.03] border border-white/[0.06] rounded-xl p-3 text-center">
+                    <div key={s.counterNumber} className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-center">
                       <div className="text-[10px] text-gray-500 uppercase tracking-wider">Counter {s.counterNumber}</div>
-                      <div className="text-2xl font-bold text-white mt-0.5">{s.ticketNumber}</div>
-                      {s.category && <div className="text-[9px] text-[#D4A843]/60 mt-1 truncate">{s.category}</div>}
+                      <div className="text-2xl font-bold text-[#9C213F] mt-0.5">{s.ticketNumber}</div>
+                      {s.category && <div className="text-[9px] text-[#8a6e2b]/80 mt-1 truncate">{s.category}</div>}
                     </div>
                   ))}
                 </div>
               </div>
-              <div className="h-px bg-gradient-to-r from-transparent via-white/5 to-transparent" />
+              <div className="h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
             </>
           )}
 
@@ -405,33 +412,33 @@ export default function DisplayPage() {
           <div className="flex-1 px-6 py-4 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <span className="text-xs font-bold tracking-[0.2em] uppercase text-gray-500">Waiting</span>
-                <span className="text-[10px] text-gray-600 ml-2" dir="rtl">قائمة الانتظار</span>
+                <span className="text-xs font-bold tracking-[0.2em] uppercase text-gray-600">Waiting</span>
+                <span className="text-[10px] text-gray-500 ml-2" dir="rtl">قائمة الانتظار</span>
               </div>
-              <span className="text-xs text-gray-600 bg-white/5 px-2.5 py-1 rounded-full">{waiting.length}</span>
+              <span className="text-xs text-gray-700 font-semibold bg-gray-100 px-2.5 py-1 rounded-full">{waiting.length}</span>
             </div>
             {/* Estimated wait */}
             {waiting.length > 0 && (
-              <div className="text-[10px] text-gray-600 mb-2">
+              <div className="text-[10px] text-gray-500 mb-2">
                 ⏱ ~{waiting.length * avgServeTime} min est. | ~{waiting.length * avgServeTime} دقيقة
               </div>
             )}
             <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
               {waiting.length === 0 ? (
-                <div className="text-gray-700 text-center py-8 text-sm">Queue is empty<br/><span dir="rtl" className="text-[10px]">الطابور فارغ</span></div>
+                <div className="text-gray-400 text-center py-8 text-sm">Queue is empty<br/><span dir="rtl" className="text-[10px]">الطابور فارغ</span></div>
               ) : (
                 waiting.slice(0, 25).map((item, i) => (
-                  <div key={item.number} className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-white/[0.02] border border-white/[0.04]">
-                    <span className="text-xs text-gray-600 font-mono">#{i + 1}</span>
+                  <div key={item.number} className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
+                    <span className="text-xs text-gray-500 font-mono">#{i + 1}</span>
                     <div className="text-right">
-                      <span className="text-lg font-bold text-gray-300 tabular-nums">{item.number}</span>
-                      {item.category && <div className="text-[9px] text-gray-600">{item.category}</div>}
+                      <span className="text-lg font-bold text-gray-800 tabular-nums">{item.number}</span>
+                      {item.category && <div className="text-[9px] text-gray-500">{item.category}</div>}
                     </div>
                   </div>
                 ))
               )}
               {waiting.length > 25 && (
-                <div className="text-center text-gray-600 text-xs py-2">+{waiting.length - 25} more</div>
+                <div className="text-center text-gray-500 text-xs py-2">+{waiting.length - 25} more</div>
               )}
             </div>
           </div>
@@ -441,7 +448,7 @@ export default function DisplayPage() {
       {/* BOTTOM TICKER */}
       <div className="relative z-20">
         {animate && latestCall && (
-          <div className="bg-[#D4A843] text-black py-2 px-6 flex items-center gap-4 animate-slideDown">
+          <div className="bg-[#D4A843] text-[#3a2a08] py-2 px-6 flex items-center gap-4 animate-slideDown">
             <span className="font-black text-sm tracking-wider uppercase bg-[#9C213F] text-white px-3 py-0.5 rounded">
               NOW SERVING | الآن
             </span>
@@ -451,17 +458,17 @@ export default function DisplayPage() {
             </span>
           </div>
         )}
-        <div className="bg-[#1a0810] border-t-2 border-[#9C213F] flex items-center overflow-hidden h-12">
-          <div className="flex-shrink-0 bg-[#9C213F] h-full flex items-center px-5 z-10">
+        <div className="bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] border-t-2 border-[#D4A843] flex items-center overflow-hidden h-12">
+          <div className="flex-shrink-0 bg-[#7a1630] h-full flex items-center px-5 z-10">
             <span className="text-white font-black text-sm tracking-wider">AUIB QUEUE</span>
           </div>
           <div className="flex-1 overflow-hidden relative">
             <div className="animate-ticker whitespace-nowrap flex items-center h-12">
-              <span className="text-gray-200 text-sm font-medium px-8">
+              <span className="text-white text-sm font-medium px-8">
                 {tickerText}
-                <span className="mx-12 text-[#9C213F]">●</span>
+                <span className="mx-12 text-[#D4A843]">●</span>
                 {tickerText}
-                <span className="mx-12 text-[#9C213F]">●</span>
+                <span className="mx-12 text-[#D4A843]">●</span>
                 {tickerText}
               </span>
             </div>

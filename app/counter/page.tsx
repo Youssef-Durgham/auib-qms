@@ -278,8 +278,9 @@ export default function CounterPage() {
         </div>
         <div className="relative z-10 w-full max-w-sm animate-slide-up">
           <div className="text-center mb-8">
-            <div className="text-5xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-            <div className="text-gray-500 text-sm tracking-widest uppercase mt-1">Counter Login</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auib-logo.png" alt="AUIB" className="mx-auto mb-3 h-16 w-auto" />
+            <div className="text-gray-500 text-xs tracking-[0.3em] uppercase">Counter Login</div>
           </div>
           <div className="glass-card p-8 space-y-5">
             {loginError && (
@@ -308,12 +309,16 @@ export default function CounterPage() {
       <div className="max-w-2xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8 animate-slide-up">
-          <div>
-            <div className="text-3xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-            <div className="text-gray-500 text-sm">Counter {employee.counterNumber}</div>
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auib-logo.png" alt="AUIB" className="h-10 w-auto" />
+            <div className="border-l border-gray-300 pl-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wider">Counter</div>
+              <div className="text-xl font-black text-[#9C213F]">#{employee.counterNumber}</div>
+            </div>
           </div>
           <div className="text-right">
-            <div className="text-sm text-gray-300 font-medium">{employee.name}</div>
+            <div className="text-sm text-gray-700 font-medium">{employee.name}</div>
             <button onClick={logout} className="text-xs text-[#9C213F] hover:text-[#b82a4d] transition-colors">Sign Out</button>
           </div>
         </div>
@@ -335,15 +340,15 @@ export default function CounterPage() {
 
         {/* Personal stats */}
         {myStats && myStats.ticketsServed > 0 && (
-          <div className="glass-card-sm p-3 mb-4 flex items-center justify-center gap-6 text-xs text-gray-400 animate-slide-up" style={{ animationDelay: '0.07s' }}>
-            <span>📊 Avg serve time: <strong className="text-white">{myStats.avgServeTime} min</strong></span>
+          <div className="glass-card-sm p-3 mb-4 flex items-center justify-center gap-6 text-xs text-gray-500 animate-slide-up" style={{ animationDelay: '0.07s' }}>
+            <span>📊 Avg serve time: <strong className="text-gray-900">{myStats.avgServeTime} min</strong></span>
           </div>
         )}
 
         {/* Current ticket */}
         <div className="glass-card p-10 text-center mb-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
           <div className="text-sm text-gray-500 uppercase tracking-wider mb-3">Now Serving</div>
-          <div className={`text-8xl font-black ${currentTicket ? 'animate-number-glow' : 'text-gray-700'}`} style={currentTicket ? { textShadow: '0 0 30px rgba(156,33,63,0.4)' } : {}}>
+          <div className={`text-8xl font-black ${currentTicket ? 'text-[#9C213F]' : 'text-gray-300'}`} style={currentTicket ? { textShadow: '0 4px 20px rgba(156,33,63,0.18)' } : {}}>
             {currentTicket?.number || '—'}
           </div>
           {currentTicket?.category && (
@@ -380,12 +385,12 @@ export default function CounterPage() {
         {/* Transfer panel */}
         {showTransfer && currentTicket && (
           <div className="glass-card-sm p-4 mb-3 flex items-center gap-3 animate-fade-in">
-            <span className="text-sm text-gray-400">Transfer to counter:</span>
+            <span className="text-sm text-gray-600">Transfer to counter:</span>
             <input type="number" value={targetCounter} onChange={(e) => setTargetCounter(e.target.value)} placeholder="#" className="w-20 p-2 rounded-lg input-dark text-center" />
             <button onClick={transfer} disabled={!targetCounter || loading === 'transfer'} className="px-4 py-2 rounded-lg btn-crimson text-sm font-medium text-white disabled:opacity-50">
               {loading === 'transfer' ? '...' : 'Send'}
             </button>
-            <button onClick={() => setShowTransfer(false)} className="text-gray-500 hover:text-white text-sm">Cancel</button>
+            <button onClick={() => setShowTransfer(false)} className="text-gray-500 hover:text-[#9C213F] text-sm">Cancel</button>
           </div>
         )}
 
@@ -395,14 +400,14 @@ export default function CounterPage() {
 
         {/* Receipt modal */}
         {showReceipt && lastCompleted && (
-          <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4" onClick={() => setShowReceipt(false)}>
+          <div className="fixed inset-0 z-50 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowReceipt(false)}>
             <div className="glass-card p-8 max-w-sm w-full animate-slide-up" onClick={(e) => e.stopPropagation()}>
               <div ref={receiptRef} className="text-center">
                 <div className="text-[#9C213F] text-2xl font-black mb-1">AUIB</div>
                 <div className="text-xs text-gray-500 mb-4">Service Receipt</div>
-                <div className="text-4xl font-black text-white mb-2">#{lastCompleted.number}</div>
-                {lastCompleted.category && <div className="text-sm text-[#D4A843] mb-4">{lastCompleted.category}</div>}
-                <div className="h-px bg-white/10 mb-4" />
+                <div className="text-4xl font-black text-[#9C213F] mb-2">#{lastCompleted.number}</div>
+                {lastCompleted.category && <div className="text-sm text-[#8a6e2b] mb-4">{lastCompleted.category}</div>}
+                <div className="h-px bg-gray-200 mb-4" />
                 <div className="space-y-2 text-sm text-left">
                   <div className="flex justify-between"><span className="text-gray-500">Counter</span><span>{employee.counterNumber}</span></div>
                   <div className="flex justify-between"><span className="text-gray-500">Wait Time</span><span>{lastCompleted.waitTime} min</span></div>

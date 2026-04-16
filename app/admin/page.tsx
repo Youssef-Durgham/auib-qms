@@ -333,8 +333,9 @@ export default function AdminPage() {
       <div className="min-h-screen flex items-center justify-center p-6">
         <div className="w-full max-w-sm animate-slide-up">
           <div className="text-center mb-8">
-            <div className="text-5xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-            <div className="text-gray-500 text-sm tracking-widest uppercase mt-1">Admin Panel</div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auib-logo.png" alt="AUIB" className="mx-auto mb-3 h-16 w-auto" />
+            <div className="text-gray-500 text-xs tracking-[0.3em] uppercase">Admin Panel</div>
           </div>
           <div className="glass-card p-8 space-y-5">
             {loginError && <div className="px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">{loginError}</div>}
@@ -364,12 +365,16 @@ export default function AdminPage() {
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="flex items-center justify-between mb-8 animate-slide-up">
-          <div>
-            <div className="text-3xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-            <div className="text-gray-500 text-sm">Administration</div>
+          <div className="flex items-center gap-3">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auib-logo.png" alt="AUIB" className="h-10 w-auto" />
+            <div className="border-l border-gray-300 pl-3">
+              <div className="text-xs text-gray-500 uppercase tracking-wider">Admin</div>
+              <div className="text-sm font-semibold text-[#9C213F]">Administration</div>
+            </div>
           </div>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-gray-400">{user.name}</span>
+            <span className="text-sm text-gray-700 font-medium">{user.name}</span>
             <button onClick={logout} className="text-xs text-[#9C213F] hover:text-[#b82a4d] transition-colors px-3 py-1.5 rounded-lg btn-glass">Sign Out</button>
           </div>
         </div>
@@ -378,7 +383,7 @@ export default function AdminPage() {
         <div className="flex gap-2 mb-6 flex-wrap animate-slide-up" style={{ animationDelay: '0.05s' }}>
           {allTabs.map((t) => (
             <button key={t} onClick={() => { setTab(t); if (t === 'analytics') fetchAnalytics(); }}
-              className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${tab === t ? 'bg-[#9C213F] text-white' : 'btn-glass text-gray-400'}`}>
+              className={`px-4 py-2.5 rounded-xl text-sm font-medium transition-all ${tab === t ? 'bg-[#9C213F] text-white shadow-md shadow-[#9C213F]/25' : 'btn-glass'}`}>
               {tabLabels[t]}
             </button>
           ))}
@@ -392,7 +397,7 @@ export default function AdminPage() {
                 { label: 'Waiting', value: ticketStats.waiting, color: 'text-[#D4A843]' },
                 { label: 'Being Served', value: ticketStats.serving, color: 'text-blue-400' },
                 { label: 'Served Today', value: ticketStats.served, color: 'text-green-400' },
-                { label: 'Total Today', value: ticketStats.total, color: 'text-white' },
+                { label: 'Total Today', value: ticketStats.total, color: 'text-[#9C213F]' },
               ].map((s) => (
                 <div key={s.label} className="glass-card-sm p-5 text-center">
                   <div className="text-xs text-gray-500 uppercase tracking-wider">{s.label}</div>
@@ -434,7 +439,7 @@ export default function AdminPage() {
             </div>
             {showForm && (
               <div className="glass-card p-6 space-y-4">
-                <h4 className="font-semibold text-white">{editId ? 'Edit Employee' : 'New Employee'}</h4>
+                <h4 className="font-semibold text-gray-900">{editId ? 'Edit Employee' : 'New Employee'}</h4>
                 {formError && <div className="px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 text-sm">{formError}</div>}
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Name</label><input value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} className="w-full p-3 rounded-lg input-dark" placeholder="Full name" /></div>
@@ -446,7 +451,7 @@ export default function AdminPage() {
                     <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Categories (optional)</label>
                     <div className="flex flex-wrap gap-1.5">
                       {categories.map(cat => (
-                        <label key={cat} className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-white/5 cursor-pointer">
+                        <label key={cat} className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer">
                           <input type="checkbox" checked={form.categories.includes(cat)} onChange={(e) => {
                             if (e.target.checked) setForm({ ...form, categories: [...form.categories, cat] });
                             else setForm({ ...form, categories: form.categories.filter(c => c !== cat) });
@@ -477,13 +482,13 @@ export default function AdminPage() {
                   {employees.map((emp) => (
                     <tr key={emp._id} className="border-b border-white/[0.03] hover:bg-white/[0.02] transition-colors">
                       <td className="px-6 py-4 font-medium">{emp.name}</td>
-                      <td className="px-6 py-4 text-gray-400 font-mono text-sm">{emp.username}</td>
+                      <td className="px-6 py-4 text-gray-600 font-mono text-sm">{emp.username}</td>
                       <td className="px-6 py-4 text-center">{emp.counterNumber}</td>
-                      <td className="px-6 py-4 text-center"><span className={`text-xs px-2.5 py-1 rounded-full ${emp.role === 'admin' ? 'bg-[#D4A843]/20 text-[#D4A843]' : 'bg-white/5 text-gray-400'}`}>{emp.role}</span></td>
+                      <td className="px-6 py-4 text-center"><span className={`text-xs px-2.5 py-1 rounded-full font-semibold ${emp.role === 'admin' ? 'bg-[#D4A843]/20 text-[#8a6e2b]' : 'bg-gray-100 text-gray-600'}`}>{emp.role}</span></td>
                       <td className="px-6 py-4 text-center"><span className={`w-2 h-2 rounded-full inline-block ${emp.active ? 'bg-green-400' : 'bg-gray-600'}`} /></td>
                       <td className="px-6 py-4 text-right">
                         <button onClick={() => { setEditId(emp._id); setForm({ username: emp.username, password: '', name: emp.name, counterNumber: String(emp.counterNumber), role: emp.role, categories: emp.categories || [] }); setShowForm(true); setFormError(''); }}
-                          className="text-xs text-gray-400 hover:text-white transition-colors mr-3">Edit</button>
+                          className="text-xs text-gray-500 hover:text-[#9C213F] transition-colors mr-3">Edit</button>
                         <button onClick={() => deleteEmployee(emp._id)} className="text-xs text-red-400/60 hover:text-red-400 transition-colors">Delete</button>
                       </td>
                     </tr>
@@ -512,7 +517,7 @@ export default function AdminPage() {
                   ) : (
                     <>
                       <span className="flex-1 text-sm font-medium">{cat}</span>
-                      <button onClick={() => { setEditCatIdx(i); setEditCatVal(cat); }} className="text-xs text-gray-400 hover:text-white">Edit</button>
+                      <button onClick={() => { setEditCatIdx(i); setEditCatVal(cat); }} className="text-xs text-gray-500 hover:text-[#9C213F]">Edit</button>
                       <button onClick={() => removeCategory(i)} className="text-xs text-red-400/60 hover:text-red-400">Delete</button>
                     </>
                   )}
@@ -534,7 +539,7 @@ export default function AdminPage() {
             <h3 className="text-lg font-semibold text-[#D4A843]">Analytics Dashboard</h3>
             <div className="grid grid-cols-4 gap-4">
               {[
-                { label: 'Total Today', value: analytics.today.total, color: 'text-white' },
+                { label: 'Total Today', value: analytics.today.total, color: 'text-[#9C213F]' },
                 { label: 'Avg Wait', value: `${analytics.today.avgWaitTime}m`, color: 'text-[#D4A843]' },
                 { label: 'Avg Serve', value: `${analytics.today.avgServeTime}m`, color: 'text-blue-400' },
                 { label: 'Cancelled', value: analytics.today.cancelled, color: 'text-red-400' },
@@ -571,7 +576,7 @@ export default function AdminPage() {
                 {Object.entries(analytics.today.counterBreakdown).map(([num, count]) => (
                   <div key={num} className="glass-card-sm p-4 text-center">
                     <div className="text-xs text-gray-500">Counter {num}</div>
-                    <div className="text-2xl font-bold text-white mt-1">{count}</div>
+                    <div className="text-2xl font-bold text-[#9C213F] mt-1">{count}</div>
                   </div>
                 ))}
               </div>
@@ -628,7 +633,7 @@ export default function AdminPage() {
             <h3 className="text-lg font-semibold text-[#D4A843]">Voice Announcement Settings</h3>
             {savedVoice && (
               <div className="glass-card-sm p-4 flex items-center gap-3">
-                <span className="text-green-400">✓</span><span className="text-sm text-gray-400">Currently saved:</span><span className="text-sm text-white font-medium">{savedVoice}</span>
+                <span className="text-green-600">✓</span><span className="text-sm text-gray-500">Currently saved:</span><span className="text-sm text-gray-900 font-medium">{savedVoice}</span>
               </div>
             )}
             <div className="glass-card p-6 space-y-5">
@@ -655,7 +660,7 @@ export default function AdminPage() {
               </div>
               <div className="flex gap-3">
                 <button onClick={previewVoice} className="px-6 py-3 rounded-xl btn-glass text-sm font-medium">🔊 Preview</button>
-                <button onClick={() => window.speechSynthesis?.cancel()} className="px-6 py-3 rounded-xl btn-glass text-sm font-medium text-gray-400">⏹ Stop</button>
+                <button onClick={() => window.speechSynthesis?.cancel()} className="px-6 py-3 rounded-xl btn-glass text-sm font-medium">⏹ Stop</button>
                 <button onClick={saveVoiceSettings} disabled={voiceSaving} className="px-6 py-3 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50">
                   {voiceSaved ? '✓ Saved!' : voiceSaving ? 'Saving...' : '💾 Save'}
                 </button>
@@ -671,21 +676,21 @@ export default function AdminPage() {
             <div className="glass-card p-6">
               <input ref={fileInputRef} type="file" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" onChange={(e) => { const f = e.target.files; if (f?.[0]) uploadVideo(f[0]); e.target.value = ''; }} className="hidden" />
               <div onClick={() => !videoUploading && fileInputRef.current?.click()} className={`border-2 border-dashed border-white/10 rounded-xl p-8 text-center cursor-pointer hover:border-[#9C213F]/40 transition-all ${videoUploading ? 'opacity-50 pointer-events-none' : ''}`}>
-                {videoUploading ? <div><div className="text-3xl mb-2 animate-pulse">⏳</div><div className="text-sm text-gray-400">{uploadProgress}</div></div>
-                  : <div><div className="text-3xl mb-2">📁</div><div className="text-sm text-white font-medium">Click to upload video</div><div className="text-xs text-gray-500 mt-1">MP4, WebM, MOV</div></div>}
+                {videoUploading ? <div><div className="text-3xl mb-2 animate-pulse">⏳</div><div className="text-sm text-gray-600">{uploadProgress}</div></div>
+                  : <div><div className="text-3xl mb-2">📁</div><div className="text-sm text-gray-900 font-medium">Click to upload video</div><div className="text-xs text-gray-500 mt-1">MP4, WebM, MOV</div></div>}
               </div>
             </div>
             {videoList.length > 0 && (
               <div className="glass-card p-6 space-y-3">
-                <h4 className="font-semibold text-white text-sm mb-3">Playlist ({videoList.length})</h4>
+                <h4 className="font-semibold text-gray-900 text-sm mb-3">Playlist ({videoList.length})</h4>
                 {videoList.map((v, i) => (
                   <div key={i} className="flex items-center gap-4 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
                     <span className="text-xs text-gray-600 font-mono w-6">#{i + 1}</span>
-                    <div className="flex-1 min-w-0"><div className="text-sm font-medium text-white truncate">{v.name || v.filename}</div></div>
-                    <video src={v.url} className="w-16 h-10 rounded object-cover bg-black/50" muted preload="metadata" />
+                    <div className="flex-1 min-w-0"><div className="text-sm font-medium text-gray-800 truncate">{v.name || v.filename}</div></div>
+                    <video src={v.url} className="w-16 h-10 rounded object-cover bg-gray-100" muted preload="metadata" />
                     <div className="flex items-center gap-1">
-                      <button onClick={() => moveVideo(i, -1)} className="text-gray-500 hover:text-white p-1.5 text-xs">▲</button>
-                      <button onClick={() => moveVideo(i, 1)} className="text-gray-500 hover:text-white p-1.5 text-xs">▼</button>
+                      <button onClick={() => moveVideo(i, -1)} className="text-gray-500 hover:text-[#9C213F] p-1.5 text-xs">▲</button>
+                      <button onClick={() => moveVideo(i, 1)} className="text-gray-500 hover:text-[#9C213F] p-1.5 text-xs">▼</button>
                       <button onClick={() => removeVideo(i)} className="text-red-400/60 hover:text-red-400 p-1.5 text-xs">✕</button>
                     </div>
                   </div>
@@ -702,7 +707,7 @@ export default function AdminPage() {
 
             {/* Auto Reset */}
             <div className="glass-card p-6 space-y-4">
-              <h4 className="font-semibold text-white text-sm">Auto Daily Reset</h4>
+              <h4 className="font-semibold text-gray-900 text-sm">Auto Daily Reset</h4>
               <p className="text-xs text-gray-500">Automatically reset the queue at a specific time each day.</p>
               <div className="flex items-center gap-3">
                 <label className="text-xs text-gray-500">Reset Time:</label>
@@ -712,7 +717,7 @@ export default function AdminPage() {
 
             {/* Custom Ticker Messages */}
             <div className="glass-card p-6 space-y-4">
-              <h4 className="font-semibold text-white text-sm">Custom Ticker Messages</h4>
+              <h4 className="font-semibold text-gray-900 text-sm">Custom Ticker Messages</h4>
               <p className="text-xs text-gray-500">Add custom messages that scroll on the display monitor ticker.</p>
               {tickerMessages.map((msg, i) => (
                 <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">

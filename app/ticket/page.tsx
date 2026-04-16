@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Image from 'next/image';
 
 interface TicketData {
   ticket: { number: number; createdAt: string; category: string };
@@ -18,6 +19,7 @@ export default function TicketPage() {
   const [showTicket, setShowTicket] = useState(false);
   const [categories, setCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [kioskMode, setKioskMode] = useState(false);
 
   const fetchQueue = useCallback(async () => {
     try {
@@ -31,6 +33,13 @@ export default function TicketPage() {
   }, []);
 
   useEffect(() => {
+    // Kiosk mode via ?kiosk=1 — only then do we auto-print + auto-reset.
+    // Normal browsers visiting /ticket skip auto-print so Chrome's dialog
+    // doesn't pop up when you're not using the kiosk launcher.
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('kiosk') === '1') setKioskMode(true);
+    }
     fetchQueue();
     // Load categories from settings
     fetch('/api/settings').then(r => r.json()).then(data => {
@@ -55,14 +64,15 @@ export default function TicketPage() {
     return () => eventSource.close();
   }, [fetchQueue]);
 
-  const takeTicket = async () => {
-    if (!selectedCategory) return;
+  const takeTicket = async (category: string) => {
+    if (loading) return;
+    setSelectedCategory(category);
     setLoading(true);
     try {
       const res = await fetch('/api/tickets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category: selectedCategory }),
+        body: JSON.stringify({ category }),
       });
       const data = await res.json();
       setTicketData(data);
@@ -74,8 +84,58 @@ export default function TicketPage() {
     setLoading(false);
   };
 
-  const printTicket = () => window.print();
-  const resetView = () => { setShowTicket(false); setTicketData(null); setSelectedCategory(null); };
+  const resetView = useCallback(() => { setShowTicket(false); setTicketData(null); setSelectedCategory(null); }, []);
+
+  // Try the local print agent (ESC/POS, instant, no dialog).
+  // Uses text/plain content type so there's no CORS preflight.
+  const sendToAgent = useCallback(async (data: TicketData) => {
+    const created = new Date(data.ticket.createdAt);
+    const payload = {
+      number: data.ticket.number,
+      category: data.ticket.category,
+      date: created.toLocaleDateString(),
+      time: created.toLocaleTimeString(),
+      position: data.position,
+      wait: data.estimatedWait,
+    };
+    try {
+      const controller = new AbortController();
+      const t = setTimeout(() => controller.abort(), 2500);
+      const res = await fetch('http://localhost:9100/print', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain' },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      });
+      clearTimeout(t);
+      if (res.ok) { console.log('[ticket] printed via agent'); return true; }
+      console.warn('[ticket] agent returned status', res.status);
+    } catch (e) {
+      console.warn('[ticket] agent unreachable, falling back to browser print', e);
+    }
+    return false;
+  }, []);
+
+  // Auto-print + auto-reset on every ticket. Agent path is silent & instant.
+  // Browser print only runs if the agent is unreachable AND kiosk mode is on.
+  useEffect(() => {
+    if (!showTicket || !ticketData) return;
+    let cancelled = false;
+    let resetTimer: ReturnType<typeof setTimeout> | undefined;
+    (async () => {
+      const printedByAgent = await sendToAgent(ticketData);
+      if (cancelled) return;
+      if (printedByAgent) {
+        resetTimer = setTimeout(() => resetView(), 3500);
+        return;
+      }
+      if (kioskMode) {
+        requestAnimationFrame(() => { try { window.print(); } catch {} });
+        resetTimer = setTimeout(() => resetView(), 4000);
+      }
+    })();
+    return () => { cancelled = true; if (resetTimer) clearTimeout(resetTimer); };
+  }, [kioskMode, showTicket, ticketData, resetView, sendToAgent]);
 
   const estimatedMin = waitingCount * avgServeTime;
 
@@ -87,8 +147,16 @@ export default function TicketPage() {
 
       {/* Header */}
       <div className="relative z-10 text-center mb-10 animate-slide-up">
-        <div className="text-5xl font-black text-[#9C213F] tracking-tight">AUIB</div>
-        <div className="text-sm text-gray-500 tracking-widest uppercase mt-1">Queue Management</div>
+        <Image
+          src="/auib-logo.png"
+          alt="AUIB"
+          width={160}
+          height={80}
+          priority
+          className="mx-auto mb-3"
+          style={{ height: 'auto' }}
+        />
+        <div className="text-xs text-gray-500 tracking-[0.3em] uppercase">Queue Management</div>
         <div className="mt-3 w-16 h-0.5 bg-gradient-to-r from-transparent via-[#D4A843] to-transparent mx-auto" />
       </div>
 
@@ -99,45 +167,32 @@ export default function TicketPage() {
               <span className="text-4xl">🎫</span>
             </div>
 
-            <div className="text-gray-400 text-sm uppercase tracking-wider mb-2">People waiting</div>
-            <div className="text-6xl font-black text-white mb-1">{waitingCount}</div>
-            <div className="text-sm text-gray-600 mb-6">~{estimatedMin} min estimated</div>
+            <div className="text-gray-500 text-sm uppercase tracking-wider mb-2">People waiting</div>
+            <div className="text-6xl font-black text-[#273237] mb-1">{waitingCount}</div>
+            <div className="text-sm text-gray-500 mb-6">~{estimatedMin} min estimated</div>
 
-            {/* Category selection */}
-            {!selectedCategory ? (
-              <div>
-                <div className="text-sm text-[#D4A843] font-medium mb-3 uppercase tracking-wider">Select Service</div>
-                <div className="grid grid-cols-2 gap-3">
-                  {categories.map((cat) => (
-                    <button
-                      key={cat}
-                      onClick={() => setSelectedCategory(cat)}
-                      className="py-4 px-3 rounded-xl btn-glass text-sm font-medium hover:border-[#9C213F]/40 transition-all"
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
+            {/* Category selection — one tap creates the ticket and auto-prints */}
+            <div>
+              <div className="text-sm text-[#D4A843] font-medium mb-3 uppercase tracking-wider">
+                {loading ? (
+                  <span className="animate-breathe">Printing ticket for {selectedCategory}...</span>
+                ) : (
+                  'Select Service'
+                )}
               </div>
-            ) : (
-              <div>
-                <div className="mb-4 px-4 py-2 rounded-xl bg-[#D4A843]/10 border border-[#D4A843]/20 text-[#D4A843] text-sm font-medium">
-                  {selectedCategory}
-                  <button onClick={() => setSelectedCategory(null)} className="ml-2 text-[#D4A843]/50 hover:text-[#D4A843]">✕</button>
-                </div>
-                <button
-                  onClick={takeTicket}
-                  disabled={loading}
-                  className="w-full py-7 rounded-2xl btn-crimson text-2xl font-bold text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  {loading ? (
-                    <span className="animate-breathe">Taking ticket...</span>
-                  ) : (
-                    'Take a Ticket'
-                  )}
-                </button>
+              <div className="grid grid-cols-2 gap-3">
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => takeTicket(cat)}
+                    disabled={loading}
+                    className="py-4 px-3 rounded-xl btn-glass text-sm font-medium hover:border-[#9C213F]/40 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    {cat}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
           </div>
         </div>
       ) : (
@@ -146,42 +201,38 @@ export default function TicketPage() {
             <div className="text-[#9C213F] text-3xl font-black tracking-tight mb-0.5">AUIB</div>
             <div className="text-xs text-gray-500 tracking-wider mb-8">American University in Iraq, Baghdad</div>
 
-            <div className="text-sm font-medium tracking-[0.2em] uppercase text-[#D4A843] mb-3">Your Ticket</div>
+            <div className="text-sm font-medium tracking-[0.2em] uppercase text-[#9C213F] mb-3">Your Ticket</div>
             <div
-              className="text-9xl font-black text-white mb-4 animate-number-glow"
-              style={{ textShadow: '0 0 40px rgba(156,33,63,0.4)' }}
+              className="text-9xl font-black text-[#9C213F] mb-4"
+              style={{ textShadow: '0 4px 24px rgba(156,33,63,0.18)' }}
             >
               {ticketData?.ticket.number}
             </div>
 
             {ticketData?.ticket.category && (
-              <div className="mb-6 inline-block px-4 py-1.5 rounded-full bg-[#D4A843]/10 border border-[#D4A843]/20 text-[#D4A843] text-sm font-medium">
+              <div className="mb-6 inline-block px-4 py-1.5 rounded-full bg-[#D4A843]/15 border border-[#D4A843]/40 text-[#8a6e2b] text-sm font-semibold">
                 {ticketData.ticket.category}
               </div>
             )}
 
-            <div className="w-full h-px bg-gradient-to-r from-transparent via-white/10 to-transparent mb-6" />
+            <div className="w-full h-px bg-gradient-to-r from-transparent via-[#9C213F]/20 to-transparent mb-6" />
 
             <div className="space-y-3 text-sm">
               {[
                 ['Date', new Date(ticketData?.ticket.createdAt || '').toLocaleDateString()],
                 ['Time', new Date(ticketData?.ticket.createdAt || '').toLocaleTimeString()],
                 ['Position', `#${ticketData?.position}`],
-                ['Est. Wait', `~${ticketData?.estimatedWait} min`],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between">
                   <span className="text-gray-500">{label}</span>
-                  <span className="font-medium">{value}</span>
+                  <span className="font-semibold text-gray-800">{value}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          <div className="flex gap-3 mt-5">
-            <button onClick={printTicket} className="flex-1 py-4 rounded-2xl btn-glass text-lg font-semibold">
-              🖨️ Print
-            </button>
-            <button onClick={resetView} className="flex-1 py-4 rounded-2xl btn-crimson text-lg font-semibold text-white">
+          <div className="mt-5">
+            <button onClick={resetView} className="w-full py-4 rounded-2xl btn-crimson text-lg font-semibold text-white">
               New Ticket
             </button>
           </div>
