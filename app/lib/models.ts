@@ -2,6 +2,7 @@ import mongoose, { Schema, Document } from 'mongoose';
 
 export interface ITicket extends Document {
   number: number;
+  dateKey: string;
   status: 'waiting' | 'serving' | 'served' | 'cancelled';
   counterNumber: number | null;
   category: string;
@@ -14,6 +15,9 @@ export interface ITicket extends Document {
 
 const TicketSchema = new Schema<ITicket>({
   number: { type: Number, required: true },
+  // Per-day key (YYYY-MM-DD, server-local). Scopes daily numbering and backs
+  // the unique (dateKey, number) constraint that prevents duplicate numbers.
+  dateKey: { type: String, default: null },
   status: { type: String, enum: ['waiting', 'serving', 'served', 'cancelled'], default: 'waiting' },
   counterNumber: { type: Number, default: null },
   category: { type: String, default: 'General Inquiry' },
@@ -23,6 +27,16 @@ const TicketSchema = new Schema<ITicket>({
   recallCount: { type: Number, default: 0 },
   cancelReason: { type: String, default: null },
 });
+
+// Speed up the per-day range queries + sorts used across every endpoint.
+TicketSchema.index({ createdAt: 1, number: 1 });
+TicketSchema.index({ status: 1, createdAt: 1 });
+// Guarantee one ticket number per day. Partial filter excludes legacy tickets
+// (created before dateKey existed) so the index builds cleanly on existing data.
+TicketSchema.index(
+  { dateKey: 1, number: 1 },
+  { unique: true, partialFilterExpression: { dateKey: { $type: 'string' } } }
+);
 
 export interface ICounter extends Document {
   number: number;

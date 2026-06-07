@@ -63,8 +63,7 @@ export default function CounterPage() {
       setEmployee(data.employee);
       await fetch('/api/counter/open', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: data.employee.counterNumber, employeeName: data.employee.name }),
+        headers: { Authorization: `Bearer ${data.token}` },
       });
     } catch { setLoginError('Connection error'); }
     setLoginLoading(false);
@@ -153,8 +152,7 @@ export default function CounterPage() {
     try {
       const res = await fetch('/api/counter/next', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: employee.counterNumber }),
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.ticket) {
@@ -173,8 +171,7 @@ export default function CounterPage() {
     try {
       const res = await fetch('/api/counter/recall', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: employee.counterNumber }),
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.autoCancelled) {
@@ -193,8 +190,7 @@ export default function CounterPage() {
     try {
       const res = await fetch('/api/counter/complete', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: employee.counterNumber }),
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       if (data.ticket) {
@@ -217,8 +213,7 @@ export default function CounterPage() {
     try {
       await fetch('/api/counter/skip', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: employee.counterNumber }),
+        headers: { Authorization: `Bearer ${token}` },
       });
       setCurrentTicket(null);
     } catch (e) { console.error(e); }
@@ -231,8 +226,8 @@ export default function CounterPage() {
     try {
       await fetch('/api/counter/transfer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ counterNumber: employee.counterNumber, targetCounter: parseInt(targetCounter) }),
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ targetCounter: parseInt(targetCounter) }),
       });
       setCurrentTicket(null);
       setShowTransfer(false);

@@ -33,8 +33,3 @@ export async function POST() {
 
   return NextResponse.json({ message: 'Queue reset for new day', reset: true });
 }
-
-export async function GET() {
-  // Allow GET for easy checking / cron job trigger
-  return POST();
-}

@@ -6,14 +6,17 @@ import bcrypt from 'bcryptjs';
 export async function POST() {
   await connectDB();
 
-  const existing = await Employee.findOne({ username: 'admin' });
+  const username = process.env.SEED_ADMIN_USERNAME || 'admin';
+  const password = process.env.SEED_ADMIN_PASSWORD || 'admin123';
+
+  const existing = await Employee.findOne({ username });
   if (existing) {
     return NextResponse.json({ message: 'Admin already exists' });
   }
 
-  const hashedPassword = await bcrypt.hash('admin123', 10);
+  const hashedPassword = await bcrypt.hash(password, 10);
   await Employee.create({
-    username: 'admin',
+    username,
     password: hashedPassword,
     name: 'Administrator',
     counterNumber: 0,
@@ -21,5 +24,5 @@ export async function POST() {
     active: true,
   });
 
-  return NextResponse.json({ message: 'Admin account seeded successfully' });
+  return NextResponse.json({ message: 'Admin account seeded successfully', username });
 }

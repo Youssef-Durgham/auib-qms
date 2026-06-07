@@ -21,7 +21,7 @@ export default function DisplayPage() {
   const [time, setTime] = useState(new Date());
   const [videos, setVideos] = useState<VideoItem[]>([]);
   const [currentVideoIndex, setCurrentVideoIndex] = useState(0);
-  const [voiceReady, setVoiceReady] = useState(false);
+  const [, setVoiceReady] = useState(false);
   const [needsActivation, setNeedsActivation] = useState(false);
   const [avgServeTime, setAvgServeTime] = useState(5);
   const [customMessages, setCustomMessages] = useState<string[]>([]);
@@ -295,35 +295,34 @@ export default function DisplayPage() {
   const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to AUIB — Queue Management System | مرحباً بكم في الجامعة الأمريكية في العراق، بغداد';
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-[#fbfaf7] to-white">
-
-      <div className="fixed top-2 left-2 z-50 flex items-center gap-1.5 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-3 py-1 shadow-sm">
-        <div className={`w-2 h-2 rounded-full ${voiceReady ? 'bg-green-500' : 'bg-yellow-500 animate-pulse'}`} />
-        <span className="text-[10px] text-gray-600">{voiceReady ? 'Voice Ready' : 'Loading voice...'}</span>
-      </div>
+    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-[#fbfaf7] to-white select-none">
 
       <button
         onClick={toggleFullscreen}
-        className={`fixed top-2 right-2 z-50 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-3 py-1.5 text-xs text-gray-600 hover:text-[#9C213F] shadow-sm transition-all ${isFullscreen ? 'opacity-0 hover:opacity-100' : ''}`}
+        className={`fixed top-3 right-3 z-50 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-4 py-2 text-sm text-gray-600 hover:text-[#9C213F] shadow-sm transition-all ${isFullscreen ? 'opacity-0 hover:opacity-100' : ''}`}
       >
         {isFullscreen ? '⊞' : '⛶'} {isFullscreen ? 'Exit' : 'Fullscreen'}
       </button>
 
       {/* TOP BAR */}
-      <div className="flex items-center justify-between px-8 py-3 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
-        <div className="flex items-center gap-4">
+      <div className="flex items-center justify-between px-10 py-4 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
+        <div className="flex items-center gap-5">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/auib-logo.png" alt="AUIB" className="h-9 w-auto bg-white/95 rounded-md px-2 py-1" />
-          <div className="h-6 w-px bg-white/30" />
-          <div className="text-sm text-white/90 font-medium tracking-wide">American University in Iraq, Baghdad</div>
-        </div>
-        <div className="flex items-center gap-4">
-          <div className="text-white/90 text-sm font-medium">
-            {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+          <img src="/auib-logo.png" alt="AUIB" className="h-14 w-auto bg-white/95 rounded-lg px-3 py-1.5 shadow-md" />
+          <div className="h-9 w-px bg-white/30" />
+          <div>
+            <div className="text-xl text-white font-semibold tracking-wide leading-tight">American University in Iraq, Baghdad</div>
+            <div className="text-sm text-white/70 tracking-wide" dir="rtl">الجامعة الأمريكية في العراق، بغداد</div>
           </div>
-          <div className="h-6 w-px bg-white/30" />
-          <div className="text-white text-lg font-bold tabular-nums">
-            {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        </div>
+        <div className="flex items-center gap-6">
+          <div className="text-right">
+            <div className="text-white text-3xl font-bold tabular-nums leading-none">
+              {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            </div>
+            <div className="text-white/80 text-sm font-medium mt-1">
+              {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+            </div>
           </div>
         </div>
       </div>
@@ -340,66 +339,71 @@ export default function DisplayPage() {
             <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white to-[#fbfaf7]">
               <div className="text-center">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/auib-logo.png" alt="AUIB" className="mx-auto h-28 w-auto opacity-80" />
-                <div className="text-gray-400 mt-4 text-sm tracking-[0.25em] uppercase">Video will appear here</div>
+                <img src="/auib-logo.png" alt="AUIB" className="mx-auto h-40 w-auto opacity-80 animate-breathe" />
+                <div className="text-gray-400 mt-6 text-base tracking-[0.3em] uppercase">Welcome to AUIB</div>
               </div>
             </div>
           )}
-          <div className="absolute top-4 right-4 bg-white/80 border border-gray-200 shadow-sm backdrop-blur-sm rounded-lg px-3 py-1.5">
-            <span className="text-[#9C213F] text-xs font-black tracking-wider">AUIB</span>
+          <div className="absolute top-5 right-5 bg-white/80 border border-gray-200 shadow-sm backdrop-blur-sm rounded-lg px-4 py-2">
+            <span className="text-[#9C213F] text-base font-black tracking-wider">AUIB</span>
           </div>
         </div>
 
         {/* RIGHT: Queue Panel */}
-        <div className="w-[380px] flex flex-col bg-white border-l border-[#9C213F]/15">
-          {/* Now Serving — bilingual */}
-          <div className={`relative p-6 transition-all duration-700 ${animate ? 'bg-[#9C213F]/5' : ''}`}>
-            <div className="absolute inset-0 bg-gradient-to-b from-[#9C213F]/5 to-transparent pointer-events-none" />
+        <div className="w-[clamp(420px,30vw,560px)] flex flex-col bg-white border-l-2 border-[#9C213F]/15 shadow-[-12px_0_40px_-20px_rgba(156,33,63,0.25)]">
+          {/* Now Serving — bilingual (HERO) */}
+          <div className={`relative px-8 py-7 transition-all duration-700 ${animate ? 'bg-[#9C213F]/[0.06]' : ''}`}>
+            <div className="absolute inset-0 bg-gradient-to-b from-[#9C213F]/[0.06] to-transparent pointer-events-none" />
             <div className="relative z-10">
-              <div className="flex items-center gap-2 mb-1">
-                <div className={`w-3 h-3 rounded-full bg-[#9C213F] ${animate ? 'animate-pulse' : ''}`} />
-                <span className="text-xs font-bold tracking-[0.25em] uppercase text-[#9C213F]">Now Serving</span>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-2.5">
+                  <div className={`w-3.5 h-3.5 rounded-full bg-[#9C213F] ${animate ? 'animate-pulse' : 'animate-breathe'}`} />
+                  <span className="text-base font-bold tracking-[0.25em] uppercase text-[#9C213F]">Now Serving</span>
+                </div>
+                <span className="text-sm text-[#9C213F]/60" dir="rtl">الآن يتم خدمة</span>
               </div>
-              <div className="text-[10px] text-[#9C213F]/60 mb-3" dir="rtl">الآن يتم خدمة</div>
               {latestCall ? (
-                <div className={`${animate ? 'animate-slideInRight' : ''}`}>
-                  <div className="text-[5rem] font-black text-[#9C213F] leading-none" style={{ textShadow: '0 4px 20px rgba(156,33,63,0.18)' }}>
+                <div key={`${latestCall.ticketNumber}-${latestCall.counterNumber}`} className={animate ? 'animate-ticket-in' : ''}>
+                  <div
+                    className={`font-black text-[#9C213F] leading-[0.9] tracking-tight ${animate ? 'animate-number-glow' : ''}`}
+                    style={{ fontSize: 'clamp(6rem, 11vw, 11rem)', textShadow: '0 6px 30px rgba(156,33,63,0.22)' }}
+                  >
                     {latestCall.ticketNumber}
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-[#9C213F]/10 border border-[#9C213F]/30">
-                      <span className="text-lg font-semibold text-[#9C213F]">Counter {latestCall.counterNumber}</span>
+                  <div className="mt-4 flex flex-wrap items-center gap-3">
+                    <span className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-gradient-to-br from-[#9C213F] to-[#b82a4d] shadow-lg shadow-[#9C213F]/30">
+                      <span className="text-2xl font-bold text-white">Counter {latestCall.counterNumber}</span>
                     </span>
-                    <span className="text-xs text-[#9C213F]/60" dir="rtl">الكاونتر {latestCall.counterNumber}</span>
+                    <span className="text-base text-[#9C213F]/60 font-medium" dir="rtl">الكاونتر {latestCall.counterNumber}</span>
                   </div>
                   {latestCall.category && (
-                    <div className="mt-2 text-xs text-[#8a6e2b] px-3 py-1 rounded-full bg-[#D4A843]/15 border border-[#D4A843]/40 inline-block">
+                    <div className="mt-3 text-base font-medium text-[#8a6e2b] px-4 py-1.5 rounded-full bg-[#D4A843]/15 border border-[#D4A843]/40 inline-block">
                       {latestCall.category}
                     </div>
                   )}
                 </div>
               ) : (
-                <div className="text-2xl text-gray-300 font-light">—</div>
+                <div className="text-6xl text-gray-200 font-light py-8 text-center">—</div>
               )}
             </div>
           </div>
 
-          <div className="h-px bg-gradient-to-r from-transparent via-[#9C213F]/20 to-transparent" />
+          <div className="h-0.5 bg-gradient-to-r from-transparent via-[#9C213F]/25 to-transparent" />
 
           {/* Active Counters */}
           {serving.length > 0 && (
             <>
-              <div className="px-6 py-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="text-xs font-bold tracking-[0.2em] uppercase text-[#8a6e2b]">Active Counters</div>
-                  <div className="text-[10px] text-[#8a6e2b]/70" dir="rtl">الكاونترات النشطة</div>
+              <div className="px-8 py-5">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-base font-bold tracking-[0.2em] uppercase text-[#8a6e2b]">Active Counters</div>
+                  <div className="text-sm text-[#8a6e2b]/70" dir="rtl">الكاونترات النشطة</div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
+                <div className="grid grid-cols-2 gap-3">
                   {serving.map((s) => (
-                    <div key={s.counterNumber} className="bg-gray-50 border border-gray-200 rounded-xl p-3 text-center">
-                      <div className="text-[10px] text-gray-500 uppercase tracking-wider">Counter {s.counterNumber}</div>
-                      <div className="text-2xl font-bold text-[#9C213F] mt-0.5">{s.ticketNumber}</div>
-                      {s.category && <div className="text-[9px] text-[#8a6e2b]/80 mt-1 truncate">{s.category}</div>}
+                    <div key={s.counterNumber} className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-2xl p-4 text-center shadow-sm">
+                      <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Counter {s.counterNumber}</div>
+                      <div className="text-4xl font-black text-[#9C213F] mt-1 tabular-nums">{s.ticketNumber}</div>
+                      {s.category && <div className="text-xs text-[#8a6e2b]/80 mt-1 truncate">{s.category}</div>}
                     </div>
                   ))}
                 </div>
@@ -409,36 +413,36 @@ export default function DisplayPage() {
           )}
 
           {/* Waiting Queue — bilingual */}
-          <div className="flex-1 px-6 py-4 flex flex-col min-h-0">
+          <div className="flex-1 px-8 py-5 flex flex-col min-h-0">
             <div className="flex items-center justify-between mb-3">
-              <div>
-                <span className="text-xs font-bold tracking-[0.2em] uppercase text-gray-600">Waiting</span>
-                <span className="text-[10px] text-gray-500 ml-2" dir="rtl">قائمة الانتظار</span>
+              <div className="flex items-baseline gap-2">
+                <span className="text-base font-bold tracking-[0.2em] uppercase text-gray-700">Waiting</span>
+                <span className="text-sm text-gray-500" dir="rtl">قائمة الانتظار</span>
               </div>
-              <span className="text-xs text-gray-700 font-semibold bg-gray-100 px-2.5 py-1 rounded-full">{waiting.length}</span>
+              <span className="text-base text-white font-bold bg-[#9C213F] px-3.5 py-1 rounded-full shadow-sm tabular-nums">{waiting.length}</span>
             </div>
             {/* Estimated wait */}
             {waiting.length > 0 && (
-              <div className="text-[10px] text-gray-500 mb-2">
-                ⏱ ~{waiting.length * avgServeTime} min est. | ~{waiting.length * avgServeTime} دقيقة
+              <div className="text-sm text-gray-500 mb-3 flex items-center gap-1.5">
+                <span>⏱</span> ~{waiting.length * avgServeTime} min est. <span className="text-gray-400">|</span> <span dir="rtl">~{waiting.length * avgServeTime} دقيقة</span>
               </div>
             )}
-            <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
               {waiting.length === 0 ? (
-                <div className="text-gray-400 text-center py-8 text-sm">Queue is empty<br/><span dir="rtl" className="text-[10px]">الطابور فارغ</span></div>
+                <div className="text-gray-400 text-center py-12 text-lg">Queue is empty<br/><span dir="rtl" className="text-sm">الطابور فارغ</span></div>
               ) : (
-                waiting.slice(0, 25).map((item, i) => (
-                  <div key={item.number} className="flex items-center justify-between px-4 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
-                    <span className="text-xs text-gray-500 font-mono">#{i + 1}</span>
-                    <div className="text-right">
-                      <span className="text-lg font-bold text-gray-800 tabular-nums">{item.number}</span>
-                      {item.category && <div className="text-[9px] text-gray-500">{item.category}</div>}
+                waiting.slice(0, 20).map((item, i) => (
+                  <div key={item.number} className="flex items-center justify-between px-5 py-3 rounded-xl bg-gradient-to-r from-gray-50 to-white border border-gray-200">
+                    <span className="text-sm text-gray-400 font-mono font-semibold">#{i + 1}</span>
+                    <div className="text-right flex items-center gap-3">
+                      {item.category && <span className="text-xs text-gray-500">{item.category}</span>}
+                      <span className="text-2xl font-bold text-gray-800 tabular-nums">{item.number}</span>
                     </div>
                   </div>
                 ))
               )}
-              {waiting.length > 25 && (
-                <div className="text-center text-gray-500 text-xs py-2">+{waiting.length - 25} more</div>
+              {waiting.length > 20 && (
+                <div className="text-center text-gray-500 text-base font-semibold py-3">+{waiting.length - 20} more in queue</div>
               )}
             </div>
           </div>
@@ -448,27 +452,27 @@ export default function DisplayPage() {
       {/* BOTTOM TICKER */}
       <div className="relative z-20">
         {animate && latestCall && (
-          <div className="bg-[#D4A843] text-[#3a2a08] py-2 px-6 flex items-center gap-4 animate-slideDown">
-            <span className="font-black text-sm tracking-wider uppercase bg-[#9C213F] text-white px-3 py-0.5 rounded">
+          <div className="bg-gradient-to-r from-[#D4A843] to-[#e0bc63] text-[#3a2a08] py-3 px-8 flex items-center gap-5 animate-slideDown">
+            <span className="font-black text-base tracking-wider uppercase bg-[#9C213F] text-white px-4 py-1 rounded-lg shadow">
               NOW SERVING | الآن
             </span>
-            <span className="font-bold text-lg">
+            <span className="font-bold text-2xl">
               Ticket #{latestCall.ticketNumber} → Counter {latestCall.counterNumber}
-              {latestCall.category && <span className="text-sm ml-2">({latestCall.category})</span>}
+              {latestCall.category && <span className="text-lg ml-2 font-medium">({latestCall.category})</span>}
             </span>
           </div>
         )}
-        <div className="bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] border-t-2 border-[#D4A843] flex items-center overflow-hidden h-12">
-          <div className="flex-shrink-0 bg-[#7a1630] h-full flex items-center px-5 z-10">
-            <span className="text-white font-black text-sm tracking-wider">AUIB QUEUE</span>
+        <div className="bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] border-t-4 border-[#D4A843] flex items-center overflow-hidden h-16">
+          <div className="flex-shrink-0 bg-[#7a1630] h-full flex items-center px-7 z-10 shadow-lg">
+            <span className="text-white font-black text-lg tracking-wider">AUIB QUEUE</span>
           </div>
           <div className="flex-1 overflow-hidden relative">
-            <div className="animate-ticker whitespace-nowrap flex items-center h-12">
-              <span className="text-white text-sm font-medium px-8">
+            <div className="animate-ticker whitespace-nowrap flex items-center h-16">
+              <span className="text-white text-xl font-medium px-10">
                 {tickerText}
-                <span className="mx-12 text-[#D4A843]">●</span>
+                <span className="mx-14 text-[#D4A843]">●</span>
                 {tickerText}
-                <span className="mx-12 text-[#D4A843]">●</span>
+                <span className="mx-14 text-[#D4A843]">●</span>
                 {tickerText}
               </span>
             </div>
@@ -477,10 +481,6 @@ export default function DisplayPage() {
       </div>
 
       <style jsx>{`
-        @keyframes slideInRight {
-          from { opacity: 0; transform: translateX(30px); }
-          to { opacity: 1; transform: translateX(0); }
-        }
         @keyframes slideDown {
           from { opacity: 0; transform: translateY(-100%); }
           to { opacity: 1; transform: translateY(0); }
@@ -489,12 +489,11 @@ export default function DisplayPage() {
           0% { transform: translateX(0); }
           100% { transform: translateX(-33.33%); }
         }
-        .animate-slideInRight { animation: slideInRight 0.6s ease-out; }
         .animate-slideDown { animation: slideDown 0.3s ease-out; }
         .animate-ticker { animation: ticker 30s linear infinite; }
-        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156,33,63,0.3); border-radius: 2px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156,33,63,0.3); border-radius: 3px; }
       `}</style>
     </div>
   );

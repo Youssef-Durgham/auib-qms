@@ -3,10 +3,20 @@ import { connectDB } from '@/app/lib/mongodb';
 import { Ticket, Counter } from '@/app/lib/models';
 import { sseManager } from '@/app/lib/sse';
 import { getTodayRange } from '@/app/lib/helpers';
+import { getEmployeeFromRequest } from '@/app/lib/auth';
 
 export async function POST(req: NextRequest) {
   await connectDB();
-  const { counterNumber, targetCounter } = await req.json();
+  const employee = await getEmployeeFromRequest(req);
+  if (!employee) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const counterNumber = employee.counterNumber;
+  const { targetCounter } = await req.json();
+  if (typeof targetCounter !== 'number' || !Number.isInteger(targetCounter)) {
+    return NextResponse.json({ error: 'Invalid target counter' }, { status: 400 });
+  }
+  if (targetCounter === counterNumber) {
+    return NextResponse.json({ error: 'Cannot transfer to the same counter' }, { status: 400 });
+  }
   const { start, end } = getTodayRange();
 
   const counter = await Counter.findOne({ number: counterNumber });

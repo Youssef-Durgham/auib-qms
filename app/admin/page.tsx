@@ -219,7 +219,7 @@ export default function AdminPage() {
 
   const resetQueue = async () => {
     if (!confirm('Reset the entire queue? This cannot be undone.')) return;
-    await fetch('/api/reset', { method: 'POST' });
+    await fetch('/api/reset', { method: 'POST', headers: { Authorization: `Bearer ${token}` } });
     fetchStats();
   };
 
@@ -320,8 +320,9 @@ export default function AdminPage() {
   };
 
   const seedAdmin = async () => {
-    await fetch('/api/auth/seed', { method: 'POST' });
-    alert('Admin account seeded (admin / admin123)');
+    const res = await fetch('/api/auth/seed', { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    alert(data.message || 'Admin account seeded');
   };
 
   if (!authChecked) {

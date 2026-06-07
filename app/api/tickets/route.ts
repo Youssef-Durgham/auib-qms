@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { connectDB } from '@/app/lib/mongodb';
 import { Ticket } from '@/app/lib/models';
 import { sseManager } from '@/app/lib/sse';
-import { getTodayRange } from '@/app/lib/helpers';
+import { getTodayRange, getTodayKey } from '@/app/lib/helpers';
 
 export async function GET() {
   await connectDB();
@@ -30,14 +30,30 @@ export async function GET() {
 export async function POST(req: NextRequest) {
   await connectDB();
   const { start, end } = getTodayRange();
+  const dateKey = getTodayKey();
   const body = await req.json().catch(() => ({}));
   const category = body.category || 'General Inquiry';
 
-  const lastTicket = await Ticket.findOne({ createdAt: { $gte: start, $lt: end } }).sort({ number: -1 });
-  const nextNumber = lastTicket ? lastTicket.number + 1 : 1;
+  // Allocate the next number, retrying if a concurrent request grabbed it first.
+  // The unique (dateKey, number) index makes a collision fail loudly rather than
+  // silently issue duplicate ticket numbers.
+  let ticket;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const lastTicket = await Ticket.findOne({ createdAt: { $gte: start, $lt: end } }).sort({ number: -1 });
+    const nextNumber = lastTicket ? lastTicket.number + 1 : 1;
+    try {
+      ticket = await Ticket.create({ number: nextNumber, dateKey, status: 'waiting', category });
+      break;
+    } catch (err: unknown) {
+      // Duplicate key (E11000) → another request won the race; recompute and retry.
+      if (typeof err === 'object' && err !== null && (err as { code?: number }).code === 11000) continue;
+      throw err;
+    }
+  }
+  if (!ticket) {
+    return NextResponse.json({ error: 'Could not allocate a ticket number, please retry' }, { status: 503 });
+  }
 
-  const ticket = await Ticket.create({ number: nextNumber, status: 'waiting', category });
-  
   const waitingCount = await Ticket.countDocuments({ status: 'waiting', createdAt: { $gte: start, $lt: end } });
 
   // Calculate estimated wait

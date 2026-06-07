@@ -3,10 +3,13 @@ import { connectDB } from '@/app/lib/mongodb';
 import { Ticket, Counter, Employee } from '@/app/lib/models';
 import { sseManager } from '@/app/lib/sse';
 import { getTodayRange } from '@/app/lib/helpers';
+import { getEmployeeFromRequest } from '@/app/lib/auth';
 
 export async function POST(req: NextRequest) {
   await connectDB();
-  const { counterNumber } = await req.json();
+  const employee = await getEmployeeFromRequest(req);
+  if (!employee) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const counterNumber = employee.counterNumber;
   const { start, end } = getTodayRange();
 
   const counter = await Counter.findOne({ number: counterNumber });
