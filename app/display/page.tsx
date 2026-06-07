@@ -132,12 +132,31 @@ export default function DisplayPage() {
   }, []);
 
   const handleVideoEnded = () => {
+    // With a single video we use the native `loop` attribute, so onEnded only
+    // fires for a multi-video playlist — advance to the next clip.
     if (videos.length > 1) {
       setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
     } else if (videoRef.current) {
-      videoRef.current.play();
+      videoRef.current.play().catch(() => {});
     }
   };
+
+  // Recover a stuck/errored video. On a decode or source error we skip to the
+  // next clip (or reload the only clip); otherwise we just nudge playback.
+  const recoverVideo = useCallback(() => {
+    const v = videoRef.current;
+    if (!v || videos.length === 0) return;
+    if (v.error) {
+      if (videos.length > 1) {
+        setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
+      } else {
+        v.load();
+        v.play().catch(() => {});
+      }
+      return;
+    }
+    if (v.paused || v.ended) v.play().catch(() => {});
+  }, [videos]);
 
   useEffect(() => {
     if (videoRef.current && videos.length > 0) {
@@ -145,6 +164,15 @@ export default function DisplayPage() {
       videoRef.current.play().catch(() => {});
     }
   }, [currentVideoIndex, videos]);
+
+  // Watchdog: a TV display runs for hours, and a single rejected play() promise,
+  // a transient decode error, or a stall can leave the video frozen with no way
+  // to recover. Poll every few seconds and kick it back into playback.
+  useEffect(() => {
+    if (videos.length === 0) return;
+    const id = setInterval(recoverVideo, 4000);
+    return () => clearInterval(id);
+  }, [videos, recoverVideo]);
 
   // Clock
   useEffect(() => {
@@ -332,7 +360,18 @@ export default function DisplayPage() {
         {/* LEFT: Video Area */}
         <div className="flex-1 relative bg-gray-100">
           {videos.length > 0 ? (
-            <video ref={videoRef} className="absolute inset-0 w-full h-full object-cover" muted autoPlay playsInline onEnded={handleVideoEnded}>
+            <video
+              ref={videoRef}
+              key={videos[currentVideoIndex]?.url}
+              className="absolute inset-0 w-full h-full object-cover"
+              muted
+              autoPlay
+              playsInline
+              loop={videos.length <= 1}
+              onEnded={handleVideoEnded}
+              onError={recoverVideo}
+              onStalled={recoverVideo}
+            >
               <source src={videos[currentVideoIndex]?.url} />
             </video>
           ) : (
