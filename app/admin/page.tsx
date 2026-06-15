@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { normalizeCategories, type CategoryConfig } from '@/app/lib/helpers';
 
 interface Employee {
   _id: string;
@@ -71,19 +72,26 @@ export default function AdminPage() {
   const [videoSaved, setVideoSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Categories
-  const [categories, setCategories] = useState<string[]>(['Registration', 'Finance', 'IT Support', 'General Inquiry']);
-  const [newCategory, setNewCategory] = useState('');
-  const [editCatIdx, setEditCatIdx] = useState<number | null>(null);
-  const [editCatVal, setEditCatVal] = useState('');
+  // Categories (name + ticket prefix + daily limit + optional closed message)
+  const [categories, setCategories] = useState<CategoryConfig[]>([
+    { name: 'Registration', nameAr: 'التسجيل', prefix: 'R', limit: 0, start: 1000, msg: '' },
+    { name: 'Finance', nameAr: 'المالية', prefix: 'F', limit: 0, start: 2000, msg: '' },
+    { name: 'IT Support', nameAr: 'الدعم الفني', prefix: 'I', limit: 0, start: 3000, msg: '' },
+    { name: 'General Inquiry', nameAr: 'استفسار عام', prefix: 'G', limit: 0, start: 4000, msg: '' },
+  ]);
   const [catSaving, setCatSaving] = useState(false);
   const [catSaved, setCatSaved] = useState(false);
+  const categoryNames = categories.map((c) => c.name).filter(Boolean);
 
   // Analytics
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
 
-  // Settings: auto-reset, ticker messages
+  // Limit reset (dashboard)
+  const [limitResetCat, setLimitResetCat] = useState('');
+
+  // Settings: auto-reset, ticker messages, ticket start number
   const [autoResetTime, setAutoResetTime] = useState('00:00');
+  const [ticketStart, setTicketStart] = useState('1000');
   const [tickerMessages, setTickerMessages] = useState<string[]>([]);
   const [newTicker, setNewTicker] = useState('');
   const [settingsSaving, setSettingsSaving] = useState(false);
@@ -110,8 +118,9 @@ export default function AdminPage() {
       if (data.voiceName) { setSelectedVoice(data.voiceName); setSavedVoice(data.voiceName); }
       if (data.voiceRate) setVoiceRate(parseFloat(data.voiceRate));
       if (data.voicePitch) setVoicePitch(parseFloat(data.voicePitch));
-      if (data.categories) { try { setCategories(JSON.parse(data.categories)); } catch { /* */ } }
+      if (data.categories) { const c = normalizeCategories(data.categories); if (c.length) setCategories(c); }
       if (data.autoResetTime) setAutoResetTime(data.autoResetTime);
+      if (data.ticketStart) setTicketStart(String(data.ticketStart));
       if (data.tickerMessages) { try { setTickerMessages(JSON.parse(data.tickerMessages)); } catch { /* */ } }
       try {
         const vRes = await fetch('/api/videos');
@@ -223,32 +232,49 @@ export default function AdminPage() {
     fetchStats();
   };
 
-  // Categories management
-  const saveCategories = async (cats: string[]) => {
+  // Reset a service's daily limit (or all) so it reopens immediately.
+  const resetLimit = async (category?: string) => {
+    const label = category ? `"${category}"` : 'ALL services';
+    if (!confirm(`Reset today's limit for ${label}? It will reopen immediately.`)) return;
+    await fetch('/api/reset/limit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(category ? { category } : {}),
+    });
+    fetchStats();
+    alert(`✓ Limit reset for ${label}.`);
+  };
+
+  // Categories management — edit locally, persist all with Save.
+  const saveCategories = async () => {
     setCatSaving(true);
-    await saveSetting('categories', JSON.stringify(cats));
-    setCategories(cats);
+    const cleaned = categories
+      .map((c) => ({
+        name: c.name.trim(),
+        nameAr: (c.nameAr || '').trim(),
+        prefix: (c.prefix || '').toUpperCase().slice(0, 3),
+        limit: Math.max(0, Number(c.limit) || 0),
+        start: Math.max(0, Number(c.start) || 0),
+        msg: (c.msg || '').trim(),
+      }))
+      .filter((c) => c.name);
+    await saveSetting('categories', JSON.stringify(cleaned));
+    setCategories(cleaned);
     setCatSaved(true);
     setTimeout(() => setCatSaved(false), 2000);
     setCatSaving(false);
   };
 
-  const addCategory = async () => {
-    if (!newCategory.trim()) return;
-    await saveCategories([...categories, newCategory.trim()]);
-    setNewCategory('');
+  const updateCat = (idx: number, patch: Partial<CategoryConfig>) => {
+    setCategories((prev) => prev.map((c, i) => (i === idx ? { ...c, ...patch } : c)));
   };
 
-  const removeCategory = async (idx: number) => {
-    await saveCategories(categories.filter((_, i) => i !== idx));
+  const addCategory = () => {
+    setCategories((prev) => [...prev, { name: '', nameAr: '', prefix: '', limit: 0, start: 0, msg: '' }]);
   };
 
-  const updateCategory = async (idx: number) => {
-    if (!editCatVal.trim()) return;
-    const updated = [...categories];
-    updated[idx] = editCatVal.trim();
-    await saveCategories(updated);
-    setEditCatIdx(null); setEditCatVal('');
+  const removeCategory = (idx: number) => {
+    setCategories((prev) => prev.filter((_, i) => i !== idx));
   };
 
   // Voice
@@ -313,6 +339,7 @@ export default function AdminPage() {
     await Promise.all([
       saveSetting('autoResetTime', autoResetTime),
       saveSetting('tickerMessages', JSON.stringify(tickerMessages)),
+      saveSetting('ticketStart', String(Math.max(1, parseInt(ticketStart) || 1000))),
     ]);
     setSettingsSaved(true);
     setTimeout(() => setSettingsSaved(false), 2000);
@@ -421,11 +448,29 @@ export default function AdminPage() {
                 </div>
               )}
             </div>
-            <div className="glass-card p-6">
-              <h3 className="text-lg font-semibold text-[#D4A843] mb-4">Queue Actions</h3>
+            <div className="glass-card p-6 space-y-5">
+              <h3 className="text-lg font-semibold text-[#D4A843]">Queue Actions</h3>
               <button onClick={resetQueue} className="px-6 py-3 rounded-xl bg-red-900/30 border border-red-500/20 hover:bg-red-900/50 transition-all text-red-400 text-sm font-medium">
                 🗑️ Reset Entire Queue
               </button>
+
+              <div className="pt-4 border-t border-gray-200/60">
+                <div className="text-sm font-semibold text-gray-800 mb-1">Reset Daily Limit</div>
+                <p className="text-xs text-gray-500 mb-3">Reopen a service that hit its daily limit, without waiting for the next day. (Limits also reset automatically every day at midnight.)</p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <select value={limitResetCat} onChange={(e) => setLimitResetCat(e.target.value)} className="p-2.5 rounded-lg input-dark text-sm min-w-[12rem]">
+                    <option value="">— choose a service —</option>
+                    {categoryNames.map((c) => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <button onClick={() => limitResetCat && resetLimit(limitResetCat)} disabled={!limitResetCat}
+                    className="px-5 py-2.5 rounded-xl btn-glass text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed">
+                    Reset this service
+                  </button>
+                  <button onClick={() => resetLimit()} className="px-5 py-2.5 rounded-xl btn-crimson text-sm font-medium text-white">
+                    Reset ALL limits
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
         )}
@@ -451,7 +496,7 @@ export default function AdminPage() {
                   <div>
                     <label className="text-xs text-gray-500 uppercase tracking-wider mb-1 block">Categories (optional)</label>
                     <div className="flex flex-wrap gap-1.5">
-                      {categories.map(cat => (
+                      {categoryNames.map(cat => (
                         <label key={cat} className="flex items-center gap-1 text-xs px-2 py-1 rounded bg-gray-100 hover:bg-gray-200 cursor-pointer">
                           <input type="checkbox" checked={form.categories.includes(cat)} onChange={(e) => {
                             if (e.target.checked) setForm({ ...form, categories: [...form.categories, cat] });
@@ -505,30 +550,77 @@ export default function AdminPage() {
         {tab === 'categories' && (
           <div className="space-y-6 animate-fade-in">
             <h3 className="text-lg font-semibold text-[#D4A843]">Ticket Categories</h3>
-            <p className="text-sm text-gray-500">Manage service categories that visitors can choose from when taking a ticket.</p>
-            <div className="glass-card p-6 space-y-3">
+            <p className="text-sm text-gray-500">
+              Each service has a <strong>prefix</strong> (shown before the number, e.g. F → F2000), its own
+              <strong> start number</strong> (Registration → 1000, Finance → 2000…), and an optional
+              <strong> daily limit</strong>. Once a service hits its limit for the day it closes automatically and visitors
+              see the reason. Limit <strong>0</strong> = unlimited; start <strong>0</strong> = use the global default.
+            </p>
+            <div className="glass-card p-6 space-y-4">
+              {/* Column headers */}
+              <div className="flex items-center gap-3 px-1 text-[10px] uppercase tracking-wider text-gray-500 font-semibold">
+                <div className="flex-1">Service name (English)</div>
+                <div className="flex-1">الاسم بالعربي</div>
+                <div className="w-16 text-center">Prefix</div>
+                <div className="w-20 text-center">Start no.</div>
+                <div className="w-20 text-center">Limit</div>
+                <div className="flex-1">Closed message</div>
+                <div className="w-24 text-center">Actions</div>
+              </div>
               {categories.map((cat, i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
-                  {editCatIdx === i ? (
-                    <>
-                      <input value={editCatVal} onChange={(e) => setEditCatVal(e.target.value)} className="flex-1 p-2 rounded-lg input-dark text-sm" onKeyDown={(e) => e.key === 'Enter' && updateCategory(i)} />
-                      <button onClick={() => updateCategory(i)} className="text-xs text-green-400 hover:text-green-300">Save</button>
-                      <button onClick={() => setEditCatIdx(null)} className="text-xs text-gray-500">Cancel</button>
-                    </>
-                  ) : (
-                    <>
-                      <span className="flex-1 text-sm font-medium">{cat}</span>
-                      <button onClick={() => { setEditCatIdx(i); setEditCatVal(cat); }} className="text-xs text-gray-500 hover:text-[#9C213F]">Edit</button>
-                      <button onClick={() => removeCategory(i)} className="text-xs text-red-400/60 hover:text-red-400">Delete</button>
-                    </>
-                  )}
+                <div key={i} className="flex items-center gap-3 px-3 py-3 rounded-xl bg-white/[0.03] border border-white/[0.06]">
+                  <input
+                    value={cat.name}
+                    onChange={(e) => updateCat(i, { name: e.target.value })}
+                    placeholder="Service name"
+                    className="flex-1 p-2.5 rounded-lg input-dark text-sm"
+                  />
+                  <input
+                    value={cat.nameAr}
+                    onChange={(e) => updateCat(i, { nameAr: e.target.value })}
+                    placeholder="الاسم بالعربي"
+                    dir="rtl"
+                    className="flex-1 p-2.5 rounded-lg input-dark text-sm"
+                  />
+                  <input
+                    value={cat.prefix}
+                    onChange={(e) => updateCat(i, { prefix: e.target.value.toUpperCase().slice(0, 3) })}
+                    placeholder="F"
+                    maxLength={3}
+                    className="w-16 p-2.5 rounded-lg input-dark text-sm text-center font-bold uppercase"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={cat.start || 0}
+                    onChange={(e) => updateCat(i, { start: Math.max(0, parseInt(e.target.value) || 0) })}
+                    className="w-20 p-2.5 rounded-lg input-dark text-sm text-center"
+                  />
+                  <input
+                    type="number"
+                    min={0}
+                    value={cat.limit || 0}
+                    onChange={(e) => updateCat(i, { limit: Math.max(0, parseInt(e.target.value) || 0) })}
+                    className="w-20 p-2.5 rounded-lg input-dark text-sm text-center"
+                  />
+                  <input
+                    value={cat.msg}
+                    onChange={(e) => updateCat(i, { msg: e.target.value })}
+                    placeholder="Reached today's limit — back tomorrow"
+                    className="flex-1 p-2.5 rounded-lg input-dark text-sm"
+                  />
+                  <div className="w-24 flex flex-col items-end gap-1">
+                    <button onClick={() => resetLimit(cat.name)} title="Reset this service's daily limit now" className="text-xs text-blue-500/80 hover:text-blue-500 font-medium">↺ Reset limit</button>
+                    <button onClick={() => removeCategory(i)} className="text-xs text-red-400/60 hover:text-red-400">Delete</button>
+                  </div>
                 </div>
               ))}
-              <div className="flex gap-3 pt-2">
-                <input value={newCategory} onChange={(e) => setNewCategory(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addCategory()} placeholder="New category..." className="flex-1 p-3 rounded-lg input-dark text-sm" />
-                <button onClick={addCategory} disabled={catSaving} className="px-5 py-2.5 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50">
-                  {catSaved ? '✓' : '+ Add'}
+              <div className="flex flex-wrap items-center gap-3 pt-1">
+                <button onClick={addCategory} className="px-5 py-2.5 rounded-xl btn-glass text-sm font-medium">+ Add Service</button>
+                <button onClick={saveCategories} disabled={catSaving} className="px-5 py-2.5 rounded-xl btn-crimson text-sm font-medium text-white disabled:opacity-50">
+                  {catSaved ? '✓ Saved!' : catSaving ? 'Saving...' : '💾 Save Categories'}
                 </button>
+                <button onClick={() => resetLimit()} className="px-5 py-2.5 rounded-xl btn-glass text-sm font-medium text-blue-600 ml-auto">↺ Reset ALL limits</button>
               </div>
             </div>
           </div>
@@ -705,6 +797,16 @@ export default function AdminPage() {
         {tab === 'settings' && (
           <div className="space-y-6 animate-fade-in">
             <h3 className="text-lg font-semibold text-[#D4A843]">System Settings</h3>
+
+            {/* Ticket Start Number */}
+            <div className="glass-card p-6 space-y-4">
+              <h4 className="font-semibold text-gray-900 text-sm">Ticket Start Number</h4>
+              <p className="text-xs text-gray-500">The first ticket of each service every day starts from this number (e.g. 1000 → F1000, F1001…).</p>
+              <div className="flex items-center gap-3">
+                <label className="text-xs text-gray-500">Start from:</label>
+                <input type="number" min={1} value={ticketStart} onChange={(e) => setTicketStart(e.target.value)} className="w-32 p-2 rounded-lg input-dark text-sm" />
+              </div>
+            </div>
 
             {/* Auto Reset */}
             <div className="glass-card p-6 space-y-4">

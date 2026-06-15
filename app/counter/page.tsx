@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { ticketLabel } from '@/app/lib/helpers';
 
 interface EmployeeInfo {
   id: string;
@@ -12,6 +13,8 @@ interface EmployeeInfo {
 
 interface TicketInfo {
   number: number;
+  prefix?: string;
+  typeSeq?: number;
   category?: string;
   recallCount?: number;
   createdAt?: string;
@@ -33,9 +36,6 @@ export default function CounterPage() {
   const [showTransfer, setShowTransfer] = useState(false);
   const [targetCounter, setTargetCounter] = useState('');
   const [myStats, setMyStats] = useState<{ ticketsServed: number; avgServeTime: number } | null>(null);
-  const [lastCompleted, setLastCompleted] = useState<{ number: number; category?: string; waitTime?: number; serveTime?: number; createdAt?: string } | null>(null);
-  const [showReceipt, setShowReceipt] = useState(false);
-  const receiptRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const savedToken = localStorage.getItem('qms-token');
@@ -86,7 +86,7 @@ export default function CounterPage() {
       setServedCount(data.served?.length || 0);
       if (employee) {
         const s = data.serving?.find((t: { counterNumber: number }) => t.counterNumber === employee.counterNumber);
-        if (s) setCurrentTicket({ number: s.number, category: s.category, recallCount: s.recallCount, createdAt: s.createdAt, servedAt: s.servedAt });
+        if (s) setCurrentTicket({ number: s.number, prefix: s.prefix, typeSeq: s.typeSeq, category: s.category, recallCount: s.recallCount, createdAt: s.createdAt, servedAt: s.servedAt });
         else setCurrentTicket(null);
       }
     } catch (e) { console.error(e); }
@@ -111,7 +111,7 @@ export default function CounterPage() {
     eventSource.addEventListener('ticket-called', (e) => {
       const data = JSON.parse(e.data);
       if (data.counterNumber === employee.counterNumber) {
-        setCurrentTicket({ number: data.ticket.number, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
+        setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
       }
       setWaitingCount(data.waitingCount);
       setServedCount(data.servedCount);
@@ -131,7 +131,7 @@ export default function CounterPage() {
       const data = JSON.parse(e.data);
       if (data.fromCounter === employee.counterNumber) setCurrentTicket(null);
       if (data.toCounter === employee.counterNumber && data.ticket) {
-        setCurrentTicket({ number: data.ticket.number, category: data.ticket.category });
+        setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category });
       }
       fetchStats();
     });
@@ -156,7 +156,7 @@ export default function CounterPage() {
       });
       const data = await res.json();
       if (data.ticket) {
-        setCurrentTicket({ number: data.ticket.number, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
+        setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
       } else {
         setCurrentTicket(null);
         alert('No tickets waiting');
@@ -192,14 +192,8 @@ export default function CounterPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await res.json();
-      if (data.ticket) {
-        const t = data.ticket;
-        const waitTime = t.servedAt && t.createdAt ? Math.round((new Date(t.servedAt).getTime() - new Date(t.createdAt).getTime()) / 60000) : 0;
-        const serveTime = t.completedAt && t.servedAt ? Math.round((new Date(t.completedAt).getTime() - new Date(t.servedAt).getTime()) / 60000) : 0;
-        setLastCompleted({ number: t.number, category: t.category, waitTime, serveTime, createdAt: t.createdAt });
-        setShowReceipt(true);
-      }
+      await res.json().catch(() => ({}));
+      // Just free the counter — no receipt popup.
       setCurrentTicket(null);
       fetchMyStats();
     } catch (e) { console.error(e); }
@@ -234,34 +228,6 @@ export default function CounterPage() {
       setTargetCounter('');
     } catch (e) { console.error(e); }
     setLoading('');
-  };
-
-  const printReceipt = () => {
-    if (!receiptRef.current) return;
-    const w = window.open('', '_blank', 'width=400,height=600');
-    if (!w) return;
-    w.document.write(`<html><head><title>Receipt</title><style>
-      body { font-family: 'Courier New', monospace; padding: 20px; max-width: 300px; margin: 0 auto; }
-      .center { text-align: center; }
-      .bold { font-weight: bold; }
-      .line { border-top: 1px dashed #000; margin: 10px 0; }
-      .row { display: flex; justify-content: space-between; margin: 4px 0; font-size: 14px; }
-    </style></head><body>
-      <div class="center"><h2 style="color:#9C213F;margin:0">AUIB</h2><small>American University in Iraq, Baghdad</small></div>
-      <div class="line"></div>
-      <div class="center bold" style="font-size:24px;margin:10px 0">Ticket #${lastCompleted?.number}</div>
-      ${lastCompleted?.category ? `<div class="center" style="margin-bottom:10px">${lastCompleted.category}</div>` : ''}
-      <div class="line"></div>
-      <div class="row"><span>Counter:</span><span>${employee?.counterNumber}</span></div>
-      <div class="row"><span>Wait Time:</span><span>${lastCompleted?.waitTime} min</span></div>
-      <div class="row"><span>Serve Time:</span><span>${lastCompleted?.serveTime} min</span></div>
-      <div class="row"><span>Date:</span><span>${lastCompleted?.createdAt ? new Date(lastCompleted.createdAt).toLocaleDateString() : ''}</span></div>
-      <div class="row"><span>Time:</span><span>${lastCompleted?.createdAt ? new Date(lastCompleted.createdAt).toLocaleTimeString() : ''}</span></div>
-      <div class="line"></div>
-      <div class="center"><small>Thank you for visiting AUIB</small></div>
-    </body></html>`);
-    w.document.close();
-    w.print();
   };
 
   // Login screen
@@ -323,7 +289,7 @@ export default function CounterPage() {
           {[
             { label: 'Waiting', value: waitingCount, color: 'text-[#D4A843]' },
             { label: 'Served Today', value: servedCount, color: 'text-green-400' },
-            { label: 'Current', value: currentTicket?.number || '—', color: 'text-[#9C213F]' },
+            { label: 'Current', value: currentTicket ? ticketLabel(currentTicket) : '—', color: 'text-[#9C213F]' },
             { label: 'My Served', value: myStats?.ticketsServed ?? '—', color: 'text-blue-400' },
           ].map((stat) => (
             <div key={stat.label} className="glass-card-sm p-4 text-center">
@@ -344,7 +310,7 @@ export default function CounterPage() {
         <div className="glass-card p-10 text-center mb-6 animate-slide-up" style={{ animationDelay: '0.1s' }}>
           <div className="text-sm text-gray-500 uppercase tracking-wider mb-3">Now Serving</div>
           <div className={`text-8xl font-black ${currentTicket ? 'text-[#9C213F]' : 'text-gray-300'}`} style={currentTicket ? { textShadow: '0 4px 20px rgba(156,33,63,0.18)' } : {}}>
-            {currentTicket?.number || '—'}
+            {currentTicket ? ticketLabel(currentTicket) : '—'}
           </div>
           {currentTicket?.category && (
             <div className="mt-3 inline-block px-4 py-1.5 rounded-full bg-[#D4A843]/10 border border-[#D4A843]/20 text-[#D4A843] text-sm font-medium">
@@ -389,34 +355,9 @@ export default function CounterPage() {
           </div>
         )}
 
-        <button onClick={complete} disabled={!currentTicket || loading === 'complete'} className="w-full py-4 rounded-2xl bg-green-600/20 border border-green-500/20 hover:bg-green-600/30 transition-all text-lg font-semibold text-green-400 disabled:opacity-30 animate-slide-up" style={{ animationDelay: '0.2s' }}>
-          ✓ Complete & Free Counter
+        <button onClick={complete} disabled={!currentTicket || loading === 'complete'} className="w-full py-5 rounded-2xl text-xl font-bold text-white shadow-lg transition-all hover:brightness-110 disabled:opacity-40 disabled:cursor-not-allowed animate-slide-up" style={{ animationDelay: '0.2s', background: 'linear-gradient(135deg, #16a34a, #15803d)', boxShadow: '0 10px 25px -8px rgba(22,163,74,0.6)' }}>
+          {loading === 'complete' ? '...' : '✓ Complete & Free Counter'}
         </button>
-
-        {/* Receipt modal */}
-        {showReceipt && lastCompleted && (
-          <div className="fixed inset-0 z-50 bg-gray-900/40 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setShowReceipt(false)}>
-            <div className="glass-card p-8 max-w-sm w-full animate-slide-up" onClick={(e) => e.stopPropagation()}>
-              <div ref={receiptRef} className="text-center">
-                <div className="text-[#9C213F] text-2xl font-black mb-1">AUIB</div>
-                <div className="text-xs text-gray-500 mb-4">Service Receipt</div>
-                <div className="text-4xl font-black text-[#9C213F] mb-2">#{lastCompleted.number}</div>
-                {lastCompleted.category && <div className="text-sm text-[#8a6e2b] mb-4">{lastCompleted.category}</div>}
-                <div className="h-px bg-gray-200 mb-4" />
-                <div className="space-y-2 text-sm text-left">
-                  <div className="flex justify-between"><span className="text-gray-500">Counter</span><span>{employee.counterNumber}</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Wait Time</span><span>{lastCompleted.waitTime} min</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Serve Time</span><span>{lastCompleted.serveTime} min</span></div>
-                  <div className="flex justify-between"><span className="text-gray-500">Date</span><span>{lastCompleted.createdAt ? new Date(lastCompleted.createdAt).toLocaleDateString() : ''}</span></div>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button onClick={printReceipt} className="flex-1 py-3 rounded-xl btn-glass text-sm font-medium">🖨️ Print Receipt</button>
-                <button onClick={() => setShowReceipt(false)} className="flex-1 py-3 rounded-xl btn-crimson text-sm font-medium text-white">Close</button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

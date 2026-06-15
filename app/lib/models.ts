@@ -3,6 +3,11 @@ import mongoose, { Schema, Document } from 'mongoose';
 export interface ITicket extends Document {
   number: number;
   dateKey: string;
+  // Per-type display numbering: `prefix` (e.g. "F") + `typeSeq` (per-category
+  // daily counter) form the label shown to visitors, e.g. F12. `number` stays
+  // a global daily sequence used internally for ordering/serving/recall.
+  prefix: string;
+  typeSeq: number;
   status: 'waiting' | 'serving' | 'served' | 'cancelled';
   counterNumber: number | null;
   category: string;
@@ -18,6 +23,8 @@ const TicketSchema = new Schema<ITicket>({
   // Per-day key (YYYY-MM-DD, server-local). Scopes daily numbering and backs
   // the unique (dateKey, number) constraint that prevents duplicate numbers.
   dateKey: { type: String, default: null },
+  prefix: { type: String, default: '' },
+  typeSeq: { type: Number, default: 0 },
   status: { type: String, enum: ['waiting', 'serving', 'served', 'cancelled'], default: 'waiting' },
   counterNumber: { type: Number, default: null },
   category: { type: String, default: 'General Inquiry' },
@@ -36,6 +43,13 @@ TicketSchema.index({ status: 1, createdAt: 1 });
 TicketSchema.index(
   { dateKey: 1, number: 1 },
   { unique: true, partialFilterExpression: { dateKey: { $type: 'string' } } }
+);
+// Guarantee one (category, typeSeq) per day so per-type numbering never
+// duplicates. Partial filter limits it to tickets that actually use per-type
+// numbering (typeSeq > 0), leaving legacy tickets untouched.
+TicketSchema.index(
+  { dateKey: 1, category: 1, typeSeq: 1 },
+  { unique: true, partialFilterExpression: { dateKey: { $type: 'string' }, typeSeq: { $gt: 0 } } }
 );
 
 export interface ICounter extends Document {

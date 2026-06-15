@@ -1,9 +1,17 @@
 'use client';
 
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { ticketLabel } from '@/app/lib/helpers';
 
 interface ServingTicket {
   ticketNumber: number;
+  counterNumber: number;
+  category?: string;
+  label: string;
+}
+
+interface RecentCall {
+  label: string;
   counterNumber: number;
   category?: string;
 }
@@ -13,9 +21,17 @@ interface VideoItem {
   name: string;
 }
 
+// The announcement should say only the number, not the prefix letter — e.g.
+// label "F1000" is spoken as "1000".
+function spokenNumber(label: string) {
+  const digits = label.replace(/\D/g, '');
+  return digits || label;
+}
+
 export default function DisplayPage() {
   const [serving, setServing] = useState<ServingTicket[]>([]);
   const [waiting, setWaiting] = useState<{ number: number; category?: string }[]>([]);
+  const [recentCalls, setRecentCalls] = useState<RecentCall[]>([]);
   const [latestCall, setLatestCall] = useState<ServingTicket | null>(null);
   const [animate, setAnimate] = useState(false);
   const [time, setTime] = useState(new Date());
@@ -25,7 +41,6 @@ export default function DisplayPage() {
   const [needsActivation, setNeedsActivation] = useState(false);
   const [avgServeTime, setAvgServeTime] = useState(5);
   const [customMessages, setCustomMessages] = useState<string[]>([]);
-  const [isFullscreen, setIsFullscreen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const announcementQueue = useRef<ServingTicket[]>([]);
   const speaking = useRef(false);
@@ -71,21 +86,6 @@ export default function DisplayPage() {
         resolve();
       }
     });
-  }, []);
-
-  // === FULLSCREEN (Feature 12) ===
-  const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().then(() => setIsFullscreen(true)).catch(() => {});
-    } else {
-      document.exitFullscreen().then(() => setIsFullscreen(false)).catch(() => {});
-    }
-  };
-
-  useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener('fullscreenchange', handler);
-    return () => document.removeEventListener('fullscreenchange', handler);
   }, []);
 
   // Load voice settings & voices
@@ -248,19 +248,56 @@ export default function DisplayPage() {
     });
   }, []);
 
+  // Speak via the server's TTS engine, played through the Web Audio context that
+  // the chime already uses. This is what makes voice work inside the FreeKiosk
+  // WebView, which lacks the browser speechSynthesis API. Returns false on any
+  // failure so the caller can fall back to browser speech (on real Chrome).
+  const speakViaServer = useCallback((text: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      (async () => {
+        try {
+          if (!audioCtx.current) audioCtx.current = new AudioContext();
+          const ctx = audioCtx.current;
+          if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
+          const res = await fetch('/api/tts?text=' + encodeURIComponent(text));
+          if (!res.ok) { resolve(false); return; }
+          const data = await res.arrayBuffer();
+          // decodeAudioData: support both the promise and legacy callback forms.
+          const audioBuf: AudioBuffer = await new Promise((res2, rej2) => {
+            const maybe = ctx.decodeAudioData(data, res2, rej2) as unknown as Promise<AudioBuffer> | undefined;
+            if (maybe && typeof maybe.then === 'function') maybe.then(res2, rej2);
+          });
+          const src = ctx.createBufferSource();
+          src.buffer = audioBuf;
+          src.connect(ctx.destination);
+          src.onended = () => resolve(true);
+          src.start();
+        } catch {
+          resolve(false);
+        }
+      })();
+    });
+  }, []);
+
+  // Speak a phrase: prefer server TTS (works everywhere incl. WebView), and only
+  // fall back to the browser engine if the server call fails.
+  const speak = useCallback(async (text: string): Promise<void> => {
+    const ok = await speakViaServer(text);
+    if (!ok) await speakText(text);
+  }, [speakViaServer, speakText]);
+
   const processQueue = useCallback(async () => {
     if (speaking.current || announcementQueue.current.length === 0) return;
     speaking.current = true;
     const next = announcementQueue.current.shift()!;
+    const spoken = spokenNumber(next.label);
     // Play chime before speaking
     await playChime();
     await new Promise((r) => setTimeout(r, 300));
-    await speakText(`Attention please. Ticket number ${next.ticketNumber}, you are now being served at counter number ${next.counterNumber}. Please proceed to counter ${next.counterNumber}. Thank you.`);
-    await new Promise((r) => setTimeout(r, 2000));
-    await speakText(`Ticket number ${next.ticketNumber}, counter ${next.counterNumber} please.`);
+    await speak(`Ticket number ${spoken}, please proceed to desk number ${next.counterNumber}.`);
     speaking.current = false;
     processQueue();
-  }, [speakText, playChime]);
+  }, [speak, playChime]);
 
   const announce = useCallback((ticket: ServingTicket) => {
     announcementQueue.current.push(ticket);
@@ -271,10 +308,24 @@ export default function DisplayPage() {
     try {
       const res = await fetch('/api/tickets');
       const data = await res.json();
-      setServing(data.serving?.map((t: { number: number; counterNumber: number; category?: string }) => ({
-        ticketNumber: t.number, counterNumber: t.counterNumber, category: t.category,
+      setServing(data.serving?.map((t: { number: number; counterNumber: number; category?: string; prefix?: string; typeSeq?: number }) => ({
+        ticketNumber: t.number, counterNumber: t.counterNumber, category: t.category, label: ticketLabel(t),
       })) || []);
       setWaiting(data.waiting?.map((t: { number: number; category?: string }) => ({ number: t.number, category: t.category })) || []);
+      const calls: RecentCall[] = data.recentCalls || [];
+      setRecentCalls(calls);
+      // On a fresh load, seed the hero so the board isn't blank until the next
+      // live announcement: prefer a ticket currently being served, otherwise the
+      // most recent completed call.
+      const servingArr: { number: number; counterNumber: number; category?: string; prefix?: string; typeSeq?: number; servedAt?: string }[] = data.serving || [];
+      let seed: ServingTicket | null = null;
+      if (servingArr.length > 0) {
+        const latest = servingArr.reduce((a, b) => (new Date(a.servedAt || 0) >= new Date(b.servedAt || 0) ? a : b));
+        seed = { ticketNumber: latest.number, counterNumber: latest.counterNumber, category: latest.category, label: ticketLabel(latest) };
+      } else if (calls.length > 0) {
+        seed = { ticketNumber: 0, counterNumber: calls[0].counterNumber, category: calls[0].category, label: calls[0].label };
+      }
+      if (seed) setLatestCall((prev) => prev ?? seed);
       if (data.avgServeTime) setAvgServeTime(data.avgServeTime);
     } catch (e) { console.error(e); }
   }, []);
@@ -284,7 +335,7 @@ export default function DisplayPage() {
     const eventSource = new EventSource('/api/sse');
     eventSource.addEventListener('ticket-called', (e) => {
       const data = JSON.parse(e.data);
-      const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber, category: data.ticket.category };
+      const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber, category: data.ticket.category, label: ticketLabel(data.ticket) };
       setLatestCall(call);
       setAnimate(true);
       setTimeout(() => setAnimate(false), 5000);
@@ -293,7 +344,7 @@ export default function DisplayPage() {
     });
     eventSource.addEventListener('ticket-recalled', (e) => {
       const data = JSON.parse(e.data);
-      const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber };
+      const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber, label: ticketLabel({ prefix: data.prefix, typeSeq: data.typeSeq, number: data.ticketNumber }) };
       setLatestCall(call);
       setAnimate(true);
       setTimeout(() => setAnimate(false), 5000);
@@ -304,186 +355,150 @@ export default function DisplayPage() {
     eventSource.addEventListener('ticket-transferred', () => fetchTickets());
     eventSource.addEventListener('ticket-skipped', () => fetchTickets());
     eventSource.addEventListener('ticket-auto-cancelled', () => fetchTickets());
-    eventSource.addEventListener('queue-reset', () => { setServing([]); setWaiting([]); setLatestCall(null); });
+    eventSource.addEventListener('queue-reset', () => { setServing([]); setWaiting([]); setRecentCalls([]); setLatestCall(null); });
     return () => eventSource.close();
   }, [fetchTickets, announce]);
 
-  // Build ticker text (bilingual + custom messages)
+  // Build ticker text (English only + custom messages)
   const tickerItems: string[] = [];
   serving.forEach(s => {
-    tickerItems.push(`🔴 Ticket ${s.ticketNumber} → Counter ${s.counterNumber} | تذكرة ${s.ticketNumber} ← الكاونتر ${s.counterNumber}`);
+    tickerItems.push(`🔴 Ticket ${s.label} → Counter ${s.counterNumber}`);
   });
   if (waiting.length > 0) {
-    tickerItems.push(`⏳ ${waiting.length} ticket${waiting.length > 1 ? 's' : ''} waiting | ${waiting.length} بالانتظار`);
+    tickerItems.push(`⏳ ${waiting.length} ticket${waiting.length > 1 ? 's' : ''} waiting`);
   }
   if (avgServeTime > 0 && waiting.length > 0) {
-    tickerItems.push(`⏱ Est. wait: ~${waiting.length * avgServeTime} min | الوقت المتوقع: ~${waiting.length * avgServeTime} دقيقة`);
+    tickerItems.push(`⏱ Est. wait: ~${waiting.length * avgServeTime} min`);
   }
   customMessages.forEach(msg => tickerItems.push(`📢 ${msg}`));
-  const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to AUIB — Queue Management System | مرحباً بكم في الجامعة الأمريكية في العراق، بغداد';
+  const tickerText = tickerItems.length > 0 ? tickerItems.join('     |     ') : 'Welcome to the American University in Iraq, Baghdad (AUIB)';
 
   return (
-    <div className="h-screen flex flex-col overflow-hidden bg-gradient-to-br from-[#fbfaf7] to-white select-none">
-
-      <button
-        onClick={toggleFullscreen}
-        className={`fixed top-3 right-3 z-50 bg-white/80 border border-gray-200 backdrop-blur rounded-full px-4 py-2 text-sm text-gray-600 hover:text-[#9C213F] shadow-sm transition-all ${isFullscreen ? 'opacity-0 hover:opacity-100' : ''}`}
-      >
-        {isFullscreen ? '⊞' : '⛶'} {isFullscreen ? 'Exit' : 'Fullscreen'}
-      </button>
-
-      {/* TOP BAR */}
-      <div className="flex items-center justify-between px-10 py-4 bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] shadow-lg shadow-[#9C213F]/20 z-20">
-        <div className="flex items-center gap-5">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/auib-logo.png" alt="AUIB" className="h-14 w-auto bg-white/95 rounded-lg px-3 py-1.5 shadow-md" />
-          <div className="h-9 w-px bg-white/30" />
-          <div>
-            <div className="text-xl text-white font-semibold tracking-wide leading-tight">American University in Iraq, Baghdad</div>
-            <div className="text-sm text-white/70 tracking-wide" dir="rtl">الجامعة الأمريكية في العراق، بغداد</div>
-          </div>
-        </div>
-        <div className="flex items-center gap-6">
-          <div className="text-right">
-            <div className="text-white text-3xl font-bold tabular-nums leading-none">
-              {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
-            </div>
-            <div className="text-white/80 text-sm font-medium mt-1">
-              {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
-            </div>
-          </div>
-        </div>
-      </div>
+    // NOTE: colors/gradients here use inline styles + explicit rgba() instead of
+    // Tailwind opacity modifiers (/NN) and gradient utilities. Tailwind v4 emits
+    // color-mix() and "in oklab" gradients for those, which old Android WebViews
+    // (used by TV-box kiosk apps) can't parse — leaving the page unstyled.
+    <div className="h-screen flex flex-col overflow-hidden select-none" style={{ background: 'linear-gradient(135deg, #fbfaf7, #ffffff)' }}>
 
       {/* MAIN CONTENT */}
       <div className="flex-1 flex min-h-0">
-        {/* LEFT: Video Area */}
-        <div className="flex-1 relative bg-gray-100">
-          {videos.length > 0 ? (
-            <video
-              ref={videoRef}
-              key={videos[currentVideoIndex]?.url}
-              className="absolute inset-0 w-full h-full object-cover"
-              muted
-              autoPlay
-              playsInline
-              loop={videos.length <= 1}
-              onEnded={handleVideoEnded}
-              onError={recoverVideo}
-              onStalled={recoverVideo}
-            >
-              <source src={videos[currentVideoIndex]?.url} />
-            </video>
-          ) : (
-            <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-white to-[#fbfaf7]">
-              <div className="text-center">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src="/auib-logo.png" alt="AUIB" className="mx-auto h-40 w-auto opacity-80 animate-breathe" />
-                <div className="text-gray-400 mt-6 text-base tracking-[0.3em] uppercase">Welcome to AUIB</div>
+        {/* LEFT: Video on top, Now-Serving box below it */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Video Area */}
+          <div className="flex-1 relative bg-gray-100 min-h-0">
+            {videos.length > 0 ? (
+              <video
+                ref={videoRef}
+                key={videos[currentVideoIndex]?.url}
+                className="absolute top-0 right-0 bottom-0 left-0 w-full h-full object-cover"
+                muted
+                autoPlay
+                playsInline
+                loop={videos.length <= 1}
+                onEnded={handleVideoEnded}
+                onError={recoverVideo}
+                onStalled={recoverVideo}
+              >
+                <source src={videos[currentVideoIndex]?.url} />
+              </video>
+            ) : (
+              <div className="absolute top-0 right-0 bottom-0 left-0 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #ffffff, #fbfaf7)' }}>
+                <div className="text-center">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/auib-logo.png" alt="AUIB" className="mx-auto h-40 w-auto opacity-80 animate-breathe" />
+                  <div className="text-gray-400 mt-6 text-base tracking-[0.3em] uppercase">Welcome to AUIB</div>
+                </div>
               </div>
+            )}
+            <div className="absolute top-5 right-5 border border-gray-200 shadow-sm rounded-lg px-4 py-2" style={{ background: 'rgba(255,255,255,0.85)' }}>
+              <span className="text-[#9C213F] text-base font-black tracking-wider">AUIB</span>
             </div>
-          )}
-          <div className="absolute top-5 right-5 bg-white/80 border border-gray-200 shadow-sm backdrop-blur-sm rounded-lg px-4 py-2">
-            <span className="text-[#9C213F] text-base font-black tracking-wider">AUIB</span>
+          </div>
+
+          {/* Now-Serving box BELOW the video (TICKET NUMBER | COUNTER NUMBER) */}
+          <div
+            className="flex items-stretch bg-white transition-all duration-700"
+            style={{ borderTop: '6px solid #9C213F', boxShadow: '0 -12px 35px -18px rgba(156,33,63,0.45)', ...(animate ? { background: 'rgba(156,33,63,0.05)' } : {}) }}
+          >
+            <div className="flex-1 text-center py-8 px-6">
+              <div className="text-3xl font-bold tracking-[0.25em] uppercase text-gray-500 mb-2">Ticket Number</div>
+              {latestCall ? (
+                <div
+                  key={`t-${latestCall.label}-${latestCall.counterNumber}`}
+                  className={`font-black text-[#9C213F] leading-none tabular-nums ${animate ? 'animate-number-glow' : ''}`}
+                  style={{ fontSize: '9.5rem', textShadow: '0 6px 30px rgba(156,33,63,0.22)' }}
+                >
+                  {latestCall.label}
+                </div>
+              ) : (
+                <div className="font-black text-gray-200 leading-none" style={{ fontSize: '9.5rem' }}>—</div>
+              )}
+            </div>
+            <div className="w-0.5 my-8" style={{ background: 'rgba(156,33,63,0.18)' }} />
+            <div className="flex-1 text-center py-8 px-6">
+              <div className="text-3xl font-bold tracking-[0.25em] uppercase text-gray-500 mb-2">Counter Number</div>
+              {latestCall ? (
+                <div
+                  key={`c-${latestCall.label}-${latestCall.counterNumber}`}
+                  className={`font-black text-gray-800 leading-none tabular-nums ${animate ? 'animate-number-glow' : ''}`}
+                  style={{ fontSize: '9.5rem' }}
+                >
+                  {latestCall.counterNumber}
+                </div>
+              ) : (
+                <div className="font-black text-gray-200 leading-none" style={{ fontSize: '9.5rem' }}>—</div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* RIGHT: Queue Panel */}
-        <div className="w-[clamp(420px,30vw,560px)] flex flex-col bg-white border-l-2 border-[#9C213F]/15 shadow-[-12px_0_40px_-20px_rgba(156,33,63,0.25)]">
-          {/* Now Serving — bilingual (HERO) */}
-          <div className={`relative px-8 py-7 transition-all duration-700 ${animate ? 'bg-[#9C213F]/[0.06]' : ''}`}>
-            <div className="absolute inset-0 bg-gradient-to-b from-[#9C213F]/[0.06] to-transparent pointer-events-none" />
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2.5">
-                  <div className={`w-3.5 h-3.5 rounded-full bg-[#9C213F] ${animate ? 'animate-pulse' : 'animate-breathe'}`} />
-                  <span className="text-base font-bold tracking-[0.25em] uppercase text-[#9C213F]">Now Serving</span>
-                </div>
-                <span className="text-sm text-[#9C213F]/60" dir="rtl">الآن يتم خدمة</span>
-              </div>
-              {latestCall ? (
-                <div key={`${latestCall.ticketNumber}-${latestCall.counterNumber}`} className={animate ? 'animate-ticket-in' : ''}>
-                  <div
-                    className={`font-black text-[#9C213F] leading-[0.9] tracking-tight ${animate ? 'animate-number-glow' : ''}`}
-                    style={{ fontSize: 'clamp(6rem, 11vw, 11rem)', textShadow: '0 6px 30px rgba(156,33,63,0.22)' }}
-                  >
-                    {latestCall.ticketNumber}
-                  </div>
-                  <div className="mt-4 flex flex-wrap items-center gap-3">
-                    <span className="inline-flex items-center gap-2 px-6 py-2.5 rounded-2xl bg-gradient-to-br from-[#9C213F] to-[#b82a4d] shadow-lg shadow-[#9C213F]/30">
-                      <span className="text-2xl font-bold text-white">Counter {latestCall.counterNumber}</span>
-                    </span>
-                    <span className="text-base text-[#9C213F]/60 font-medium" dir="rtl">الكاونتر {latestCall.counterNumber}</span>
-                  </div>
-                  {latestCall.category && (
-                    <div className="mt-3 text-base font-medium text-[#8a6e2b] px-4 py-1.5 rounded-full bg-[#D4A843]/15 border border-[#D4A843]/40 inline-block">
-                      {latestCall.category}
-                    </div>
-                  )}
-                </div>
-              ) : (
-                <div className="text-6xl text-gray-200 font-light py-8 text-center">—</div>
-              )}
+        {/* RIGHT: Recent-calls table (TICKET NUMBER | COUNTER NUMBER) */}
+        <div className="w-[32rem] flex flex-col min-h-0 bg-white" style={{ borderLeft: '2px solid rgba(156,33,63,0.15)', boxShadow: '-12px 0 40px -20px rgba(156,33,63,0.25)' }}>
+          {/* Header */}
+          <div className="flex items-stretch" style={{ background: 'linear-gradient(90deg, #9C213F, #b82a4d)' }}>
+            <div className="flex-1 text-center py-6 px-4">
+              <div className="text-white font-bold text-4xl tracking-[0.12em] uppercase leading-tight">Ticket<br/>Number</div>
+            </div>
+            <div className="w-px" style={{ background: 'rgba(255,255,255,0.25)' }} />
+            <div className="flex-1 text-center py-6 px-4">
+              <div className="text-white font-bold text-4xl tracking-[0.12em] uppercase leading-tight">Counter<br/>Number</div>
             </div>
           </div>
 
-          <div className="h-0.5 bg-gradient-to-r from-transparent via-[#9C213F]/25 to-transparent" />
-
-          {/* Active Counters */}
-          {serving.length > 0 && (
-            <>
-              <div className="px-8 py-5">
-                <div className="flex items-center justify-between mb-4">
-                  <div className="text-base font-bold tracking-[0.2em] uppercase text-[#8a6e2b]">Active Counters</div>
-                  <div className="text-sm text-[#8a6e2b]/70" dir="rtl">الكاونترات النشطة</div>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  {serving.map((s) => (
-                    <div key={s.counterNumber} className="bg-gradient-to-br from-gray-50 to-white border border-gray-200 rounded-2xl p-4 text-center shadow-sm">
-                      <div className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Counter {s.counterNumber}</div>
-                      <div className="text-4xl font-black text-[#9C213F] mt-1 tabular-nums">{s.ticketNumber}</div>
-                      {s.category && <div className="text-xs text-[#8a6e2b]/80 mt-1 truncate">{s.category}</div>}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              <div className="h-px bg-gradient-to-r from-transparent via-gray-200 to-transparent" />
-            </>
-          )}
-
-          {/* Waiting Queue — bilingual */}
-          <div className="flex-1 px-8 py-5 flex flex-col min-h-0">
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-baseline gap-2">
-                <span className="text-base font-bold tracking-[0.2em] uppercase text-gray-700">Waiting</span>
-                <span className="text-sm text-gray-500" dir="rtl">قائمة الانتظار</span>
-              </div>
-              <span className="text-base text-white font-bold bg-[#9C213F] px-3.5 py-1 rounded-full shadow-sm tabular-nums">{waiting.length}</span>
-            </div>
-            {/* Estimated wait */}
-            {waiting.length > 0 && (
-              <div className="text-sm text-gray-500 mb-3 flex items-center gap-1.5">
-                <span>⏱</span> ~{waiting.length * avgServeTime} min est. <span className="text-gray-400">|</span> <span dir="rtl">~{waiting.length * avgServeTime} دقيقة</span>
-              </div>
-            )}
-            <div className="flex-1 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-              {waiting.length === 0 ? (
-                <div className="text-gray-400 text-center py-12 text-lg">Queue is empty<br/><span dir="rtl" className="text-sm">الطابور فارغ</span></div>
-              ) : (
-                waiting.slice(0, 20).map((item, i) => (
-                  <div key={item.number} className="flex items-center justify-between px-5 py-3 rounded-xl bg-gradient-to-r from-gray-50 to-white border border-gray-200">
-                    <span className="text-sm text-gray-400 font-mono font-semibold">#{i + 1}</span>
-                    <div className="text-right flex items-center gap-3">
-                      {item.category && <span className="text-xs text-gray-500">{item.category}</span>}
-                      <span className="text-2xl font-bold text-gray-800 tabular-nums">{item.number}</span>
-                    </div>
+          {/* Rows */}
+          <div className="flex-1 overflow-y-auto custom-scrollbar" style={{ minHeight: 0, WebkitOverflowScrolling: 'touch' }}>
+            {recentCalls.length === 0 ? (
+              <div className="text-gray-300 text-center py-20 text-2xl font-light">—</div>
+            ) : (
+              recentCalls.map((c, i) => (
+                <div
+                  key={`${c.label}-${c.counterNumber}-${i}`}
+                  className="flex items-stretch border-b"
+                  style={{
+                    borderColor: 'rgba(156,33,63,0.08)',
+                    background: i === 0 ? 'rgba(156,33,63,0.07)' : (i % 2 === 0 ? '#ffffff' : '#faf7f8'),
+                  }}
+                >
+                  <div className="flex-1 text-center py-4 px-4">
+                    <span className="font-bold text-gray-800 tabular-nums" style={{ fontSize: '2.6rem' }}>{c.label}</span>
                   </div>
-                ))
-              )}
-              {waiting.length > 20 && (
-                <div className="text-center text-gray-500 text-base font-semibold py-3">+{waiting.length - 20} more in queue</div>
-              )}
-            </div>
+                  <div className="w-px" style={{ background: 'rgba(156,33,63,0.08)' }} />
+                  <div className="flex-1 text-center py-4 px-4">
+                    <span className="font-bold text-[#9C213F] tabular-nums" style={{ fontSize: '2.6rem' }}>{c.counterNumber}</span>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+
+          {/* Footer clock — like the board's bottom-right */}
+          <div className="flex items-center justify-between px-6 py-3" style={{ background: 'linear-gradient(90deg, #9C213F, #b82a4d)' }}>
+            <span className="text-white font-bold text-2xl tabular-nums leading-none">
+              {time.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true, timeZone: 'Asia/Riyadh' })}
+            </span>
+            <span className="text-sm font-medium tabular-nums" style={{ color: 'rgba(255,255,255,0.8)' }}>
+              {time.toLocaleDateString('en-GB', { timeZone: 'Asia/Riyadh' })}
+            </span>
           </div>
         </div>
       </div>
@@ -491,27 +506,28 @@ export default function DisplayPage() {
       {/* BOTTOM TICKER */}
       <div className="relative z-20">
         {animate && latestCall && (
-          <div className="bg-gradient-to-r from-[#D4A843] to-[#e0bc63] text-[#3a2a08] py-3 px-8 flex items-center gap-5 animate-slideDown">
+          <div className="text-[#273237] py-3 px-8 flex items-center gap-5 animate-slideDown" style={{ background: 'linear-gradient(90deg, #B8BCC0, #d4d7da)' }}>
             <span className="font-black text-base tracking-wider uppercase bg-[#9C213F] text-white px-4 py-1 rounded-lg shadow">
               NOW SERVING | الآن
             </span>
             <span className="font-bold text-2xl">
-              Ticket #{latestCall.ticketNumber} → Counter {latestCall.counterNumber}
+              Ticket {latestCall.label} → Counter {latestCall.counterNumber}
               {latestCall.category && <span className="text-lg ml-2 font-medium">({latestCall.category})</span>}
             </span>
           </div>
         )}
-        <div className="bg-gradient-to-r from-[#9C213F] via-[#b82a4d] to-[#9C213F] border-t-4 border-[#D4A843] flex items-center overflow-hidden h-16">
-          <div className="flex-shrink-0 bg-[#7a1630] h-full flex items-center px-7 z-10 shadow-lg">
-            <span className="text-white font-black text-lg tracking-wider">AUIB QUEUE</span>
+        <div className="flex items-center overflow-hidden h-28" style={{ background: 'linear-gradient(90deg, #9C213F, #b82a4d, #9C213F)', borderTop: '5px solid #C9CCCE' }}>
+          <div className="flex-shrink-0 bg-white h-full flex items-center justify-center px-10 z-10 shadow-lg">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/auib-logo-wide.png" alt="AUIB" className="h-16 w-auto" />
           </div>
           <div className="flex-1 overflow-hidden relative">
-            <div className="animate-ticker whitespace-nowrap flex items-center h-16">
-              <span className="text-white text-xl font-medium px-10">
+            <div className="animate-ticker whitespace-nowrap flex items-center h-28">
+              <span className="text-white text-4xl font-semibold px-10">
                 {tickerText}
-                <span className="mx-14 text-[#D4A843]">●</span>
+                <span className="mx-14 text-[#C9CCCE]">●</span>
                 {tickerText}
-                <span className="mx-14 text-[#D4A843]">●</span>
+                <span className="mx-14 text-[#C9CCCE]">●</span>
                 {tickerText}
               </span>
             </div>
@@ -533,6 +549,14 @@ export default function DisplayPage() {
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156,33,63,0.3); border-radius: 3px; }
+      `}</style>
+
+      {/* Scale the whole display to the TV's viewport. Every Tailwind size is in
+          rem, so making the root font-size proportional to viewport width (vw)
+          makes the entire UI shrink/grow with the screen — and vw works on old
+          WebViews, unlike clamp(). Bump this number up for bigger, down for smaller. */}
+      <style jsx global>{`
+        html { font-size: 0.85vw; }
       `}</style>
     </div>
   );

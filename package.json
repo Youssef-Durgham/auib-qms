@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "next build --webpack",
     "start": "next start -H 0.0.0.0 -p 3070",
     "lint": "eslint"
   },
@@ -23,7 +23,16 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "postcss-preset-env": "^11.3.0",
     "tailwindcss": "^4",
     "typescript": "^5"
-  }
+  },
+  "//browserslist": "Targets old Android TV-box WebViews used by kiosk apps so Next/SWC transpiles client JS to syntax those engines can parse (otherwise React never hydrates and the clock/SSE/video logic is dead).",
+  "browserslist": [
+    "chrome >= 64",
+    "and_chr >= 64",
+    "edge >= 79",
+    "firefox >= 68",
+    "safari >= 12"
+  ]
 }

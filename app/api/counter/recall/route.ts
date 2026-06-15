@@ -52,6 +52,8 @@ export async function POST(req: NextRequest) {
 
   sseManager.broadcast('ticket-recalled', {
     ticketNumber: counter.currentTicket,
+    prefix: ticket.prefix,
+    typeSeq: ticket.typeSeq,
     counterNumber,
     recallCount: ticket.recallCount,
   });
