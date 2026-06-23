@@ -14,9 +14,17 @@ export async function getEmployeeFromRequest(req: NextRequest) {
   await connectDB();
   const session = await Session.findOne({ token });
   if (!session) return null;
-  
+
   const employee = await Employee.findById(session.employeeId);
   if (!employee || !employee.active) return null;
-  
+
+  // Sliding expiry: refresh the session so a counter that stays open and is actively
+  // used (or kept alive by its heartbeat) never hits the 24h TTL mid-shift. Throttled
+  // to at most one write per 30 min so this doesn't add a DB write to every request.
+  const THIRTY_MIN = 30 * 60 * 1000;
+  if (Date.now() - new Date(session.createdAt).getTime() > THIRTY_MIN) {
+    await Session.updateOne({ _id: session._id }, { $set: { createdAt: new Date() } });
+  }
+
   return employee;
 }

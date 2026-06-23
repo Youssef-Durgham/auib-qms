@@ -42,11 +42,14 @@ export default function DisplayPage() {
   const [avgServeTime, setAvgServeTime] = useState(5);
   const [customMessages, setCustomMessages] = useState<string[]>([]);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const startTimeout = useRef<ReturnType<typeof setTimeout> | null>(null);
   const announcementQueue = useRef<ServingTicket[]>([]);
   const speaking = useRef(false);
   const bestVoice = useRef<SpeechSynthesisVoice | null>(null);
   const voiceSettings = useRef<{ rate: number; pitch: number }>({ rate: 0.85, pitch: 1.05 });
   const audioCtx = useRef<AudioContext | null>(null);
+  const esRef = useRef<EventSource | null>(null);
+  const lastMsgRef = useRef<number>(Date.now());
 
   // === CHIME (Feature 1) ===
   const playChime = useCallback((): Promise<void> => {
@@ -119,51 +122,96 @@ export default function DisplayPage() {
     setTimeout(loadVoices, 1500);
   }, []);
 
-  // Load videos and custom messages from settings
+  // Load videos and custom messages from settings. Oversized clips are dropped
+  // from the playlist entirely: on the weak TV-box decoder, large/high-bitrate
+  // files stutter and stall (looks like slow loading even though the server is
+  // local), so we only play files at/under MAX_VIDEO_MB. Tune the limit below.
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).then(data => {
-      if (data.videos) {
-        try { setVideos(JSON.parse(data.videos)); } catch { /* ignore */ }
-      }
+    const MAX_VIDEO_MB = 100;
+    const MAX_BYTES = MAX_VIDEO_MB * 1024 * 1024;
+    fetch('/api/settings').then(r => r.json()).then(async (data) => {
       if (data.tickerMessages) {
         try { setCustomMessages(JSON.parse(data.tickerMessages)); } catch { /* ignore */ }
       }
+      let list: VideoItem[] = [];
+      if (data.videos) {
+        try { list = JSON.parse(data.videos); } catch { /* ignore */ }
+      }
+      // Probe each file's size and keep only the ones small enough to play
+      // smoothly. A failed probe keeps the clip (don't over-filter on a glitch).
+      const sized = await Promise.all(list.map(async (v) => {
+        try {
+          const h = await fetch(v.url, { method: 'HEAD' });
+          const len = parseInt(h.headers.get('content-length') || '0', 10);
+          if (len > 0 && len > MAX_BYTES) {
+            console.warn(`Skipping oversized video (${Math.round(len / 1048576)}MB > ${MAX_VIDEO_MB}MB):`, v.url);
+            return null;
+          }
+          return v;
+        } catch {
+          return v;
+        }
+      }));
+      setVideos(sized.filter((v): v is VideoItem => v !== null));
     }).catch(() => {});
   }, []);
+
+  // Advance to the next clip in the playlist (wraps around).
+  const advance = useCallback(() => {
+    setCurrentVideoIndex((prev) => (videos.length > 1 ? (prev + 1) % videos.length : prev));
+  }, [videos.length]);
+
+  // Skip a clip that is broken/corrupt or that never starts. A short delay
+  // before advancing prevents a tight error→advance→error spin if several clips
+  // in a row are bad.
+  const skipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const skipBadVideo = useCallback(() => {
+    if (skipTimer.current) return; // a skip is already scheduled
+    skipTimer.current = setTimeout(() => {
+      skipTimer.current = null;
+      if (videos.length > 1) advance();
+      else { videoRef.current?.load(); videoRef.current?.play().catch(() => {}); }
+    }, 600);
+  }, [advance, videos.length]);
 
   const handleVideoEnded = () => {
     // With a single video we use the native `loop` attribute, so onEnded only
     // fires for a multi-video playlist — advance to the next clip.
-    if (videos.length > 1) {
-      setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
-    } else if (videoRef.current) {
-      videoRef.current.play().catch(() => {});
-    }
+    if (videos.length > 1) advance();
+    else if (videoRef.current) videoRef.current.play().catch(() => {});
   };
 
-  // Recover a stuck/errored video. On a decode or source error we skip to the
-  // next clip (or reload the only clip); otherwise we just nudge playback.
+  // Recover a stuck/errored video. On a decode/source error (corrupt clip) we
+  // skip to the next; otherwise just nudge playback.
   const recoverVideo = useCallback(() => {
     const v = videoRef.current;
     if (!v || videos.length === 0) return;
-    if (v.error) {
-      if (videos.length > 1) {
-        setCurrentVideoIndex((prev) => (prev + 1) % videos.length);
-      } else {
-        v.load();
-        v.play().catch(() => {});
-      }
-      return;
-    }
+    if (v.error) { skipBadVideo(); return; }
     if (v.paused || v.ended) v.play().catch(() => {});
-  }, [videos]);
+  }, [videos.length, skipBadVideo]);
 
+  // When the source changes: (re)load and play, and arm a start-timeout. A
+  // healthy clip fires `playing` (which clears the timeout via onPlaying); a
+  // corrupt one that never starts gets skipped automatically so the board never
+  // sits on a blank frame.
   useEffect(() => {
-    if (videoRef.current && videos.length > 0) {
-      videoRef.current.load();
-      videoRef.current.play().catch(() => {});
-    }
-  }, [currentVideoIndex, videos]);
+    const v = videoRef.current;
+    if (!v || videos.length === 0) return;
+    v.load();
+    v.play().catch(() => {});
+    if (startTimeout.current) clearTimeout(startTimeout.current);
+    startTimeout.current = setTimeout(() => {
+      // Never reached a playable state in time → treat as broken, move on.
+      if (videos.length > 1) advance();
+      else { v.load(); v.play().catch(() => {}); }
+    }, 9000);
+    return () => { if (startTimeout.current) clearTimeout(startTimeout.current); };
+  }, [currentVideoIndex, videos, advance]);
+
+  // Clear the start-timeout as soon as the clip actually starts playing.
+  const handlePlaying = useCallback(() => {
+    if (startTimeout.current) { clearTimeout(startTimeout.current); startTimeout.current = null; }
+  }, []);
 
   // Watchdog: a TV display runs for hours, and a single rejected play() promise,
   // a transient decode error, or a stall can leave the video frozen with no way
@@ -314,49 +362,86 @@ export default function DisplayPage() {
       setWaiting(data.waiting?.map((t: { number: number; category?: string }) => ({ number: t.number, category: t.category })) || []);
       const calls: RecentCall[] = data.recentCalls || [];
       setRecentCalls(calls);
-      // On a fresh load, seed the hero so the board isn't blank until the next
-      // live announcement: prefer a ticket currently being served, otherwise the
-      // most recent completed call.
+      // Keep the big "Now Serving" panel in sync from the server state too — not
+      // just from live events. This way the board self-corrects on every poll
+      // even if a live announcement was missed (e.g. the SSE link briefly died),
+      // and it always reflects TODAY's data (the API is date-scoped).
       const servingArr: { number: number; counterNumber: number; category?: string; prefix?: string; typeSeq?: number; servedAt?: string }[] = data.serving || [];
-      let seed: ServingTicket | null = null;
       if (servingArr.length > 0) {
         const latest = servingArr.reduce((a, b) => (new Date(a.servedAt || 0) >= new Date(b.servedAt || 0) ? a : b));
-        seed = { ticketNumber: latest.number, counterNumber: latest.counterNumber, category: latest.category, label: ticketLabel(latest) };
+        const call: ServingTicket = { ticketNumber: latest.number, counterNumber: latest.counterNumber, category: latest.category, label: ticketLabel(latest) };
+        setLatestCall((prev) => (prev && prev.label === call.label && prev.counterNumber === call.counterNumber) ? prev : call);
       } else if (calls.length > 0) {
-        seed = { ticketNumber: 0, counterNumber: calls[0].counterNumber, category: calls[0].category, label: calls[0].label };
+        // Nobody being served right now — seed once so the board isn't blank.
+        const seed: ServingTicket = { ticketNumber: 0, counterNumber: calls[0].counterNumber, category: calls[0].category, label: calls[0].label };
+        setLatestCall((prev) => prev ?? seed);
       }
-      if (seed) setLatestCall((prev) => prev ?? seed);
       if (data.avgServeTime) setAvgServeTime(data.avgServeTime);
     } catch (e) { console.error(e); }
   }, []);
 
   useEffect(() => {
     fetchTickets();
-    const eventSource = new EventSource('/api/sse');
-    eventSource.addEventListener('ticket-called', (e) => {
-      const data = JSON.parse(e.data);
-      const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber, category: data.ticket.category, label: ticketLabel(data.ticket) };
-      setLatestCall(call);
-      setAnimate(true);
-      setTimeout(() => setAnimate(false), 5000);
-      announce(call);
-      fetchTickets();
-    });
-    eventSource.addEventListener('ticket-recalled', (e) => {
-      const data = JSON.parse(e.data);
-      const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber, label: ticketLabel({ prefix: data.prefix, typeSeq: data.typeSeq, number: data.ticketNumber }) };
-      setLatestCall(call);
-      setAnimate(true);
-      setTimeout(() => setAnimate(false), 5000);
-      announce(call);
-    });
-    eventSource.addEventListener('ticket-created', () => fetchTickets());
-    eventSource.addEventListener('ticket-completed', () => fetchTickets());
-    eventSource.addEventListener('ticket-transferred', () => fetchTickets());
-    eventSource.addEventListener('ticket-skipped', () => fetchTickets());
-    eventSource.addEventListener('ticket-auto-cancelled', () => fetchTickets());
-    eventSource.addEventListener('queue-reset', () => { setServing([]); setWaiting([]); setRecentCalls([]); setLatestCall(null); });
-    return () => eventSource.close();
+    const markAlive = () => { lastMsgRef.current = Date.now(); };
+
+    const connect = () => {
+      try { esRef.current?.close(); } catch { /* ignore */ }
+      const es = new EventSource('/api/sse');
+      esRef.current = es;
+      markAlive();
+
+      // Whenever the link (re)opens, immediately re-sync from the server so the
+      // board can never sit on a stale snapshot after a dropped connection.
+      es.onopen = () => { markAlive(); fetchTickets(); };
+      es.addEventListener('connected', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('heartbeat', markAlive);
+
+      es.addEventListener('ticket-called', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        const call = { ticketNumber: data.ticket.number, counterNumber: data.counterNumber, category: data.ticket.category, label: ticketLabel(data.ticket) };
+        setLatestCall(call);
+        setAnimate(true);
+        setTimeout(() => setAnimate(false), 5000);
+        announce(call);
+        fetchTickets();
+      });
+      es.addEventListener('ticket-recalled', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        const call = { ticketNumber: data.ticketNumber, counterNumber: data.counterNumber, label: ticketLabel({ prefix: data.prefix, typeSeq: data.typeSeq, number: data.ticketNumber }) };
+        setLatestCall(call);
+        setAnimate(true);
+        setTimeout(() => setAnimate(false), 5000);
+        announce(call);
+      });
+      es.addEventListener('ticket-created', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('ticket-completed', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('ticket-transferred', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('ticket-skipped', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('ticket-auto-cancelled', () => { markAlive(); fetchTickets(); });
+      es.addEventListener('queue-reset', () => { markAlive(); setServing([]); setWaiting([]); setRecentCalls([]); setLatestCall(null); });
+    };
+
+    connect();
+
+    // Polling fallback: keep the board current even if the live link is dead.
+    // The API is date-scoped, so this also makes yesterday's tickets disappear
+    // on a new day without anyone touching the device.
+    const polling = setInterval(fetchTickets, 10000);
+
+    // Watchdog: the heartbeat arrives every 15s. If nothing (not even a
+    // heartbeat) has come for 45s the link is dead — rebuild it so calls and
+    // voice announcements resume automatically, with no manual restart.
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastMsgRef.current > 45000) connect();
+    }, 10000);
+
+    return () => {
+      clearInterval(polling);
+      clearInterval(watchdog);
+      try { esRef.current?.close(); } catch { /* ignore */ }
+    };
   }, [fetchTickets, announce]);
 
   // Build ticker text (English only + custom messages)
@@ -389,18 +474,26 @@ export default function DisplayPage() {
             {videos.length > 0 ? (
               <video
                 ref={videoRef}
-                key={videos[currentVideoIndex]?.url}
+                // Single stable element whose `src` is swapped on advance (see the
+                // effect below). Using a React `key` here remounts the element on
+                // every clip change, which races with autoplay and can leave the
+                // board on a blank frame after the first video — so we DON'T key it.
+                src={videos[currentVideoIndex]?.url}
                 className="absolute top-0 right-0 bottom-0 left-0 w-full h-full object-cover"
+                // Promote the video to its own GPU compositing layer so repaints
+                // elsewhere on the board (the call number, ticker) can't make it
+                // stutter during an announcement.
+                style={{ transform: 'translateZ(0)', backfaceVisibility: 'hidden' }}
                 muted
                 autoPlay
                 playsInline
+                preload="auto"
                 loop={videos.length <= 1}
                 onEnded={handleVideoEnded}
-                onError={recoverVideo}
+                onPlaying={handlePlaying}
+                onError={skipBadVideo}
                 onStalled={recoverVideo}
-              >
-                <source src={videos[currentVideoIndex]?.url} />
-              </video>
+              />
             ) : (
               <div className="absolute top-0 right-0 bottom-0 left-0 flex items-center justify-center" style={{ background: 'linear-gradient(135deg, #ffffff, #fbfaf7)' }}>
                 <div className="text-center">
@@ -545,7 +638,9 @@ export default function DisplayPage() {
           100% { transform: translateX(-33.33%); }
         }
         .animate-slideDown { animation: slideDown 0.3s ease-out; }
-        .animate-ticker { animation: ticker 30s linear infinite; }
+        /* will-change + translateZ keep the marquee on its own GPU layer so it
+           doesn't drop frames while a new (large) video is buffering/decoding. */
+        .animate-ticker { animation: ticker 30s linear infinite; will-change: transform; transform: translateZ(0); backface-visibility: hidden; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156,33,63,0.3); border-radius: 3px; }

@@ -45,7 +45,14 @@
       "PowerShell(npm run build 2>&1)",
       "PowerShell(try { $r = Invoke-RestMethod -Uri 'http://localhost:3070/api/tickets' -TimeoutSec 10; $r.tickets | Select-Object category, prefix, typeSeq, number, status | Format-Table -AutoSize | Out-String } catch { \"ERR: $_\" })",
       "PowerShell(try { $b = @{category='Finance'} | ConvertTo-Json; $r = Invoke-RestMethod -Uri 'http://localhost:3070/api/tickets' -Method Post -ContentType 'application/json' -Body $b -TimeoutSec 10; \"Finance -> prefix=$\\($r.ticket.prefix\\) typeSeq=$\\($r.ticket.typeSeq\\)  => label $\\($r.ticket.prefix\\)$\\($r.ticket.typeSeq\\)\" } catch { \"ERR: $_\" })",
-      "PowerShell(git *)"
+      "PowerShell(git *)",
+      "PowerShell(git -C $repo add \"app/api/appointments/[id]/handle/route.js\" \"app/appointments/[id]/page.js\")",
+      "PowerShell(git -C $repo commit -m \"Vitals: require only Blood Pressure, Temperature and Heart Rate for nurse/doctor assessment\" -m \"SpO2, Weight and Height are now optional in both client and server validation.\" -m \"Co-Authored-By: Claude Opus 4.8 \\(1M context\\) <noreply@anthropic.com>\")",
+      "PowerShell(git -C $repo push)",
+      "PowerShell(git -C $repo log --oneline -1)",
+      "PowerShell($repo = \"C:\\\\Users\\\\Administrator\\\\Documents\\\\Custom Application\\\\Clinic-App-AUIB\")",
+      "PowerShell(git -C $repo diff -- app/appointments/page.js models/Appointment.js models/Dispensing.js app/auth/signin/page.js)",
+      "PowerShell(pm2 logs clinic-app --err --lines 40 --nostream 2>$null)"
     ]
   }
 }

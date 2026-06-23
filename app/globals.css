@@ -76,9 +76,13 @@ body {
   50% { box-shadow: 0 0 40px rgba(156,33,63,0.5), 0 0 100px rgba(156,33,63,0.2); }
 }
 
+/* GPU-composited pulse. Previously this animated `text-shadow`, which forces a
+   full repaint every frame on the giant call number and stutters the display
+   video on weak TV-box GPUs during an announcement. A transform scale is
+   composited on the GPU and doesn't repaint, so the video stays smooth. */
 @keyframes numberGlow {
-  0%, 100% { text-shadow: 0 0 30px rgba(156,33,63,0.4); }
-  50% { text-shadow: 0 0 60px rgba(156,33,63,0.7), 0 0 120px rgba(156,33,63,0.3); }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.035); }
 }
 
 @keyframes shimmer {
@@ -101,7 +105,7 @@ body {
 .animate-slide-right { animation: slideInRight 0.4s ease-out both; }
 .animate-fade-in { animation: fadeIn 0.4s ease-out both; }
 .animate-glow-pulse { animation: glowPulse 2s ease-in-out infinite; }
-.animate-number-glow { animation: numberGlow 2s ease-in-out infinite; }
+.animate-number-glow { animation: numberGlow 2s ease-in-out infinite; will-change: transform; }
 .animate-ticket-in { animation: ticketSlideIn 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both; }
 .animate-breathe { animation: breathe 3s ease-in-out infinite; }
 

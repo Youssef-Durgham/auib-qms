@@ -2,12 +2,16 @@ import { NextResponse } from 'next/server';
 import { connectDB } from '@/app/lib/mongodb';
 import { Ticket, Counter, Settings } from '@/app/lib/models';
 import { sseManager } from '@/app/lib/sse';
+import { getTodayKey } from '@/app/lib/helpers';
 
 export async function POST() {
   await connectDB();
 
   const now = new Date();
-  const todayStr = now.toISOString().split('T')[0];
+  // Local-day key (not UTC) so the daily reset fires at the configured local
+  // time. Using UTC here delayed the reset by the timezone offset (e.g. +3h),
+  // which let yesterday's queue linger into the new local day.
+  const todayStr = getTodayKey();
 
   // Check last reset date
   const lastReset = await Settings.findOne({ key: 'lastResetDate' });

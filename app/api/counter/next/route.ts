@@ -21,10 +21,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Get next waiting ticket (optionally filtered by counter categories)
+  // Get next waiting ticket, restricted to the services this employee is allowed
+  // to handle. The authoritative assignment lives on the employee
+  // (employee.categories); fall back to the counter's categories only if the
+  // employee has none. Without this, an employee assigned e.g. "Enrollment
+  // Services" would still be handed a "Student Finance" ticket.
+  const allowedCategories = (employee.categories && employee.categories.length > 0)
+    ? employee.categories
+    : (counter?.categories || []);
   const query: Record<string, unknown> = { status: 'waiting', createdAt: { $gte: start, $lt: end } };
-  if (counter?.categories && counter.categories.length > 0) {
-    query.category = { $in: counter.categories };
+  if (allowedCategories.length > 0) {
+    query.category = { $in: allowedCategories };
   }
 
   const nextTicket = await Ticket.findOneAndUpdate(

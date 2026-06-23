@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   }
 
   await connectDB();
-  const { username, password, name, counterNumber, role } = await req.json();
+  const { username, password, name, counterNumber, role, categories } = await req.json();
 
   if (!username || !password || !name || !counterNumber) {
     return NextResponse.json({ error: 'All fields are required' }, { status: 400 });
@@ -41,10 +41,11 @@ export async function POST(req: NextRequest) {
     counterNumber,
     role: role || 'employee',
     active: true,
+    categories: Array.isArray(categories) ? categories : [],
   });
 
   return NextResponse.json({
-    employee: { id: employee._id, username, name, counterNumber, role: employee.role, active: true },
+    employee: { id: employee._id, username, name, counterNumber, role: employee.role, active: true, categories: employee.categories },
   });
 }
 
@@ -55,7 +56,7 @@ export async function PUT(req: NextRequest) {
   }
 
   await connectDB();
-  const { id, username, password, name, counterNumber, role, active } = await req.json();
+  const { id, username, password, name, counterNumber, role, active, categories } = await req.json();
 
   const update: Record<string, unknown> = {};
   if (username) update.username = username;
@@ -64,6 +65,7 @@ export async function PUT(req: NextRequest) {
   if (role) update.role = role;
   if (active !== undefined) update.active = active;
   if (password) update.password = await bcrypt.hash(password, 10);
+  if (categories !== undefined) update.categories = Array.isArray(categories) ? categories : [];
 
   const employee = await Employee.findByIdAndUpdate(id, update, { new: true }).select('-password');
   if (!employee) {

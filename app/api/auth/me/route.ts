@@ -13,5 +13,6 @@ export async function GET(req: NextRequest) {
     name: employee.name,
     counterNumber: employee.counterNumber,
     role: employee.role,
+    categories: employee.categories || [],
   });
 }

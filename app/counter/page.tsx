@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ticketLabel } from '@/app/lib/helpers';
 
 interface EmployeeInfo {
@@ -9,6 +9,7 @@ interface EmployeeInfo {
   username: string;
   counterNumber: number;
   role: string;
+  categories?: string[];
 }
 
 interface TicketInfo {
@@ -78,11 +79,28 @@ export default function CounterPage() {
     setToken(null);
   };
 
+  // Called when an authenticated request comes back 401 (session expired/removed).
+  // Return to the login screen with a clear message instead of a misleading
+  // "No tickets waiting" alert.
+  const handleSessionExpired = useCallback(() => {
+    localStorage.removeItem('qms-token');
+    setEmployee(null);
+    setToken(null);
+    setLoading('');
+    alert('انتهت الجلسة. الرجاء تسجيل الدخول من جديد.\nالسنشن خلصت — Session expired, please log in again.');
+  }, []);
+
   const fetchStats = useCallback(async () => {
     try {
       const res = await fetch('/api/tickets');
       const data = await res.json();
-      setWaitingCount(data.waiting?.length || 0);
+      // Only count tickets this employee is allowed to serve. An employee with
+      // no assigned services sees the full queue (handles everything).
+      const empCats: string[] = employee?.categories || [];
+      const myWaiting = (data.waiting || []).filter(
+        (t: { category?: string }) => empCats.length === 0 || (t.category != null && empCats.includes(t.category))
+      );
+      setWaitingCount(myWaiting.length);
       setServedCount(data.served?.length || 0);
       if (employee) {
         const s = data.serving?.find((t: { counterNumber: number }) => t.counterNumber === employee.counterNumber);
@@ -103,48 +121,94 @@ export default function CounterPage() {
     } catch { /* ignore */ }
   }, [employee]);
 
+  const esRef = useRef<EventSource | null>(null);
+  const lastMsgRef = useRef<number>(Date.now());
+
   useEffect(() => {
     if (!employee) return;
     fetchStats();
     fetchMyStats();
-    const eventSource = new EventSource('/api/sse');
-    eventSource.addEventListener('ticket-called', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.counterNumber === employee.counterNumber) {
-        setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
-      }
-      setWaitingCount(data.waitingCount);
-      setServedCount(data.servedCount);
-    });
-    eventSource.addEventListener('ticket-created', () => fetchStats());
-    eventSource.addEventListener('ticket-completed', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.counterNumber === employee.counterNumber) setCurrentTicket(null);
-      setWaitingCount(data.waitingCount);
-      setServedCount(data.servedCount);
-    });
-    eventSource.addEventListener('ticket-skipped', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.counterNumber === employee.counterNumber) setCurrentTicket(null);
-    });
-    eventSource.addEventListener('ticket-transferred', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.fromCounter === employee.counterNumber) setCurrentTicket(null);
-      if (data.toCounter === employee.counterNumber && data.ticket) {
-        setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category });
-      }
-      fetchStats();
-    });
-    eventSource.addEventListener('ticket-auto-cancelled', (e) => {
-      const data = JSON.parse(e.data);
-      if (data.counterNumber === employee.counterNumber) {
-        setCurrentTicket(null);
-        alert(`Ticket #${data.ticketNumber} was auto-cancelled (recall limit reached)`);
-      }
-    });
-    eventSource.addEventListener('queue-reset', () => { setCurrentTicket(null); setWaitingCount(0); setServedCount(0); });
-    return () => eventSource.close();
+    const markAlive = () => { lastMsgRef.current = Date.now(); };
+
+    const connect = () => {
+      try { esRef.current?.close(); } catch { /* ignore */ }
+      const es = new EventSource('/api/sse');
+      esRef.current = es;
+      markAlive();
+      es.onopen = () => { markAlive(); fetchStats(); };
+      es.addEventListener('connected', () => { markAlive(); fetchStats(); });
+      es.addEventListener('heartbeat', markAlive);
+
+      es.addEventListener('ticket-called', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        if (data.counterNumber === employee.counterNumber) {
+          setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });
+        }
+        // Recompute against this employee's services rather than trusting the
+        // broadcast's global counts.
+        fetchStats();
+      });
+      es.addEventListener('ticket-created', () => { markAlive(); fetchStats(); });
+      es.addEventListener('ticket-completed', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        if (data.counterNumber === employee.counterNumber) setCurrentTicket(null);
+        fetchStats();
+      });
+      es.addEventListener('ticket-skipped', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        if (data.counterNumber === employee.counterNumber) setCurrentTicket(null);
+      });
+      es.addEventListener('ticket-transferred', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        if (data.fromCounter === employee.counterNumber) setCurrentTicket(null);
+        if (data.toCounter === employee.counterNumber && data.ticket) {
+          setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category });
+        }
+        fetchStats();
+      });
+      es.addEventListener('ticket-auto-cancelled', (e) => {
+        markAlive();
+        const data = JSON.parse(e.data);
+        if (data.counterNumber === employee.counterNumber) {
+          setCurrentTicket(null);
+          alert(`Ticket #${data.ticketNumber} was auto-cancelled (recall limit reached)`);
+        }
+      });
+      es.addEventListener('queue-reset', () => { markAlive(); setCurrentTicket(null); setWaitingCount(0); setServedCount(0); });
+    };
+
+    connect();
+    const polling = setInterval(fetchStats, 12000);
+    const watchdog = setInterval(() => {
+      if (Date.now() - lastMsgRef.current > 45000) connect();
+    }, 10000);
+
+    return () => {
+      clearInterval(polling);
+      clearInterval(watchdog);
+      try { esRef.current?.close(); } catch { /* ignore */ }
+    };
   }, [employee, fetchStats, fetchMyStats]);
+
+  // Heartbeat: while the counter is open, periodically ping an authenticated endpoint
+  // so the session's sliding expiry keeps refreshing — a page left open all shift no
+  // longer hits the 24h TTL. If the session has already died, drop to the login screen
+  // (so the operator sees a clear "log in again", not a confusing "No tickets waiting").
+  useEffect(() => {
+    if (!token || !employee) return;
+    const ping = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { headers: { Authorization: `Bearer ${token}` } });
+        if (res.status === 401) handleSessionExpired();
+      } catch { /* transient network error — retry on the next tick */ }
+    };
+    const id = setInterval(ping, 5 * 60 * 1000); // every 5 minutes
+    return () => clearInterval(id);
+  }, [token, employee, handleSessionExpired]);
 
   const callNext = async () => {
     if (!employee) return;
@@ -154,6 +218,7 @@ export default function CounterPage() {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (res.status === 401) { handleSessionExpired(); return; }
       const data = await res.json();
       if (data.ticket) {
         setCurrentTicket({ number: data.ticket.number, prefix: data.ticket.prefix, typeSeq: data.ticket.typeSeq, category: data.ticket.category, recallCount: data.ticket.recallCount, createdAt: data.ticket.createdAt, servedAt: data.ticket.servedAt });

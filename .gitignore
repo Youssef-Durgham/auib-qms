@@ -39,3 +39,12 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# Video files & backups (large binaries — never commit)
+videos-backup/
+public/videos/
+*.mp4
+*.webm
+*.mov
+*.avi
+*.mkv
